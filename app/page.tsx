@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import dynamic from "next/dynamic";
-import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search } from "lucide-react";
+import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database } from "lucide-react";
 
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLayer), { ssr: false });
@@ -459,7 +459,7 @@ Tecnico: ${tecnicoNome}`;
         descStr += `-----------------------------------\n`;
         descStr += `(Movimentazione totale prevista: ${totaleMovimenti} pz)`;
 
-        const primaRiga = interventiGiorno[0];
+        const primaRiga = interventiGiorno[0] || { giorno: getNomeGiorno(dataStr) };
         const oldDistinta = vecchieDistinte.find(d => d.dataAssegnata === dataStr);
 
         const distintaObj = {
@@ -532,8 +532,12 @@ Tecnico: ${tecnicoNome}`;
     const datiConCoordinate = [];
     for (const cliente of Array.from(clientiMappa.values())) {
       let coordinate = null;
-      if (cliente.indirizzo?.trim().length > 2) coordinate = await trovaCoordinateGoogle(cliente.indirizzo, cliente.localita);
-      datiConCoordinate.push({ ...cliente, lat: coordinate?.lat || 44.4056, lng: coordinate?.lng || 8.9463 });
+      let origineCoord = "default";
+      if (cliente.indirizzo?.trim().length > 2) {
+        coordinate = await trovaCoordinateGoogle(cliente.indirizzo, cliente.localita);
+        if (coordinate) origineCoord = coordinate.origine || "google";
+      }
+      datiConCoordinate.push({ ...cliente, lat: coordinate?.lat || 44.4056, lng: coordinate?.lng || 8.9463, origineCoord });
     }
 
     const dateRange = getGiornateLavorative(dataInizio, dataFine, giorniAttivi);
@@ -568,7 +572,7 @@ Tecnico: ${tecnicoNome}`;
             dataAssegnata: evt.dataStr, giorno: getNomeGiorno(evt.dataStr),
             selezionatoPerGiro: true, syncedToGoogle: true,
             minutiLavoro: evt.durataMinuti, lat: evt.lat, lng: evt.lng,
-            contatto, telefono, email, muletti_eorv: 0,
+            contatto, telefono, email, muletti_eorv: 0, origineCoord: "calendar",
             descrizionePregressa: evt.description || "Nessun dettaglio da Google"
         };
     });
@@ -1321,7 +1325,15 @@ Tecnico: ${tecnicoNome}`;
                           <td className="p-4">
                             <span className="font-bold text-slate-900 text-sm block leading-tight">{generaTitoloEvento(intervento)}</span>
                             {intervento.isPregresso && <span className="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-xl text-[9px] font-extrabold block w-max mt-1.5 border border-indigo-200">📌 GIÀ A CALENDARIO</span>}
-                            <p className="text-slate-500 text-[11px] mt-1">{intervento.indirizzo} {intervento.localita ? `- ${intervento.localita}` : ""}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                               <p className="text-slate-500 text-[11px]">{intervento.indirizzo} {intervento.localita ? `- ${intervento.localita}` : ""}</p>
+                               {intervento.origineCoord === 'google' && (
+                                 <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] px-1.5 py-0.5 rounded font-mono font-bold flex items-center gap-0.5" title="Coordinate trovate tramite Google Maps"><MapPin size={9}/> Google</span>
+                               )}
+                               {intervento.origineCoord === 'memoria' && (
+                                 <span className="bg-blue-50 text-blue-700 border border-blue-200 text-[9px] px-1.5 py-0.5 rounded font-mono font-bold flex items-center gap-0.5" title="Coordinate caricate dalla memoria cache locale"><Database size={9}/> Memoria</span>
+                               )}
+                            </div>
                           </td>
                           <td className="p-4">
                             <span className="block text-[11px] text-slate-500 font-mono font-bold flex items-center gap-1.5 mb-1"><Clock size={12} className={intervento.isPregresso ? "text-indigo-500" : ""}/> {intervento.oraInizio} - {intervento.oraFine}</span>
