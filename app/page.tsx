@@ -630,33 +630,29 @@ Tecnico: ${tecnicoNome}`;
     });
 
     // ==========================================
-    // FASE A: Clustering Spaziale (Le Macchie)
+    // FASE A: Clustering a "Raggio Chiuso" (Anticatena)
     // ==========================================
     const clusters: any[][] = [];
     const unassigned = [...clientiDaPianificare];
-    const SOGLIA_KM_CLUSTER = 5; // Raggio di 5 km per raggruppare i clienti in una zona
+    const RAGGIO_MAX_CLUSTER_KM = 2.5; // Massimo 2.5 km dal centro esatto del gruppo
 
     while (unassigned.length > 0) {
-      const initial = unassigned.shift();
-      const cluster = [initial];
-      let added = true;
+      const seed = unassigned.shift(); // Elegge il primo cantiere come "Centro"
+      const cluster = [seed];
       
-      while (added) {
-        added = false;
-        for (let i = unassigned.length - 1; i >= 0; i--) {
-          const c = unassigned[i];
-          const isNear = cluster.some(cl => calcolaDistanzaKm(cl.lat, cl.lng, c.lat, c.lng) <= SOGLIA_KM_CLUSTER);
-          if (isNear) {
-            cluster.push(c);
-            unassigned.splice(i, 1);
-            added = true;
-          }
+      for (let i = unassigned.length - 1; i >= 0; i--) {
+        const c = unassigned[i];
+        // Calcola la distanza dal centro, NON dagli altri elementi (spezza la catena)
+        const dist = calcolaDistanzaKm(seed.lat, seed.lng, c.lat, c.lng);
+        if (dist <= RAGGIO_MAX_CLUSTER_KM) {
+          cluster.push(c);
+          unassigned.splice(i, 1);
         }
       }
       clusters.push(cluster);
     }
 
-    // Ordiniamo i cluster per dimensione: i più corposi hanno la precedenza per riempire le giornate
+    // Ordiniamo i cluster per dimensione: le macchie più grosse riempiono le giornate per prime
     clusters.sort((a, b) => b.length - a.length);
 
     // ==========================================
@@ -785,11 +781,19 @@ Tecnico: ${tecnicoNome}`;
     const nomeFileLower = file.name.toLowerCase();
     setNomeFileCorrente(file.name);
     
+    // LOGICA MIGLIORATA PER SELEZIONE AUTOMATICA TECNICO
+    let matchTrovato = false;
     for (const tech of tecniciAnagrafica) {
-      if (tech.nome.toLowerCase().split(" ").some(p => p.length > 2 && nomeFileLower.includes(p))) {
-        setTecnicoSelezionato(tech);
-        break;
+      const paroleNome = tech.nome.toLowerCase().split(" ");
+      for (const parola of paroleNome) {
+        // Cerca parole lunghe più di 3 lettere (evita di matchare articoli o iniziali)
+        if (parola.length > 3 && nomeFileLower.includes(parola)) {
+          setTecnicoSelezionato(tech);
+          matchTrovato = true;
+          break;
+        }
       }
+      if (matchTrovato) break;
     }
 
     elaboraFileExcelGenerico(file, (righe) => {
