@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
@@ -628,50 +629,116 @@ Tecnico: ${tecnicoNome}`;
       return { ...g, minutiDisponibili, statoGiornata, anchorLat, anchorLng, orarioPartenzaMinuti: maxFineMinuti };
     });
 
+    // ==========================================
+    // FASE A: Clustering Spaziale (Le Macchie)
+    // ==========================================
+    const clusters: any[][] = [];
+    const unassigned = [...clientiDaPianificare];
+    const SOGLIA_KM_CLUSTER = 5; // Raggio di 5 km per raggruppare i clienti in una zona
+
+    while (unassigned.length > 0) {
+      const initial = unassigned.shift();
+      const cluster = [initial];
+      let added = true;
+      
+      while (added) {
+        added = false;
+        for (let i = unassigned.length - 1; i >= 0; i--) {
+          const c = unassigned[i];
+          const isNear = cluster.some(cl => calcolaDistanzaKm(cl.lat, cl.lng, c.lat, c.lng) <= SOGLIA_KM_CLUSTER);
+          if (isNear) {
+            cluster.push(c);
+            unassigned.splice(i, 1);
+            added = true;
+          }
+        }
+      }
+      clusters.push(cluster);
+    }
+
+    // Ordiniamo i cluster per dimensione: i più corposi hanno la precedenza per riempire le giornate
+    clusters.sort((a, b) => b.length - a.length);
+
+    // ==========================================
+    // FASE B e C: Assegnazione Blocchi & Micro-Routing
+    // ==========================================
     const clientiPianificati = [];
 
     for (const giornata of giornateStrutturate) {
       if (giornata.minutiDisponibili <= 0) continue; 
       
-      let ultimaCoordGiorno: { lat: number; lng: number } | null = giornata.anchorLat !== null && giornata.anchorLng !== null ? { lat: giornata.anchorLat, lng: giornata.anchorLng } : null;
+      let ultimaCoordGiorno = giornata.anchorLat !== null && giornata.anchorLng !== null 
+        ? { lat: giornata.anchorLat, lng: giornata.anchorLng } 
+        : { lat: SEDE_UFFICIO_LAT, lng: SEDE_UFFICIO_LNG };
+        
       let orarioAttualeSimulato = giornata.orarioPartenzaMinuti; 
-      let aggiuntoQualcuno = true;
-
-      while (aggiuntoQualcuno && clientiDaPianificare.length > 0) {
-        aggiuntoQualcuno = false;
-        let bestIdx = -1; let minDistanza = Infinity;
-        const puntoPartenza = ultimaCoordGiorno || { lat: SEDE_UFFICIO_LAT, lng: SEDE_UFFICIO_LNG };
-
-        for (let i = 0; i < clientiDaPianificare.length; i++) {
-          const c = clientiDaPianificare[i];
-          const dist = calcolaDistanzaKm(puntoPartenza.lat, puntoPartenza.lng, c.lat, c.lng);
-          if (dist < minDistanza) { minDistanza = dist; bestIdx = i; }
+      
+      while (true) {
+        let bestClusterIdx = -1;
+        let minClusterDist = Infinity;
+        
+        // Trova il cluster ("la macchia") geograficamente più vicina all'ultimo punto visitato
+        for (let i = 0; i < clusters.length; i++) {
+          if (clusters[i].length === 0) continue;
+          const distToCluster = Math.min(...clusters[i].map(c => calcolaDistanzaKm(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, c.lat, c.lng)));
+          if (distToCluster < minClusterDist) {
+            minClusterDist = distToCluster;
+            bestClusterIdx = i;
+          }
         }
+        
+        if (bestClusterIdx === -1) break; // Non ci sono più cluster
+        
+        const activeCluster = clusters[bestClusterIdx];
+        let aggiuntoQualcuno = false;
 
-        if (bestIdx !== -1) {
-          const candidato = clientiDaPianificare[bestIdx];
-          const minViaggio = Math.round(minDistanza * 2);
-          const minRientro = Math.round(calcolaDistanzaKm(candidato.lat, candidato.lng, SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG) * 2);
-          
-          const { inizioLavoro, fineLavoro } = calcolaTempistiche(orarioAttualeSimulato, minViaggio, candidato.minutiLavoro);
+        // Routing interno al cluster (Nearest Neighbor LOCALE alla zona scelta)
+        while (activeCluster.length > 0) {
+          let bestIdx = -1; 
+          let minDistanza = Infinity;
 
-          if ((fineLavoro + minRientro) <= FINE_GIORNATA_ASSOLUTA) {
-            clientiPianificati.push({ 
-                ...candidato, 
-                settimana: `${formattaDataVisuale(dataInizio)} al ${formattaDataVisuale(dataFine)}`, 
-                giorno: giornata.nomeGiorno, 
-                dataAssegnata: giornata.dataStr 
-            });
-            orarioAttualeSimulato = fineLavoro;
-            ultimaCoordGiorno = { lat: candidato.lat, lng: candidato.lng };
-            clientiDaPianificare.splice(bestIdx, 1);
-            aggiuntoQualcuno = true;
-          } else { break; }
+          for (let i = 0; i < activeCluster.length; i++) {
+            const c = activeCluster[i];
+            const dist = calcolaDistanzaKm(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, c.lat, c.lng);
+            if (dist < minDistanza) { minDistanza = dist; bestIdx = i; }
+          }
+
+          if (bestIdx !== -1) {
+            const candidato = activeCluster[bestIdx];
+            const minViaggio = Math.round(minDistanza * 2);
+            const minRientro = Math.round(calcolaDistanzaKm(candidato.lat, candidato.lng, SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG) * 2);
+            
+            const { inizioLavoro, fineLavoro } = calcolaTempistiche(orarioAttualeSimulato, minViaggio, candidato.minutiLavoro);
+
+            // Verifica se nel turno di oggi c'è tempo per fare il viaggio, lavorare e rientrare
+            if ((fineLavoro + minRientro) <= FINE_GIORNATA_ASSOLUTA) {
+              clientiPianificati.push({ 
+                  ...candidato, 
+                  settimana: `${formattaDataVisuale(dataInizio)} al ${formattaDataVisuale(dataFine)}`, 
+                  giorno: giornata.nomeGiorno, 
+                  dataAssegnata: giornata.dataStr 
+              });
+              orarioAttualeSimulato = fineLavoro;
+              ultimaCoordGiorno = { lat: candidato.lat, lng: candidato.lng };
+              activeCluster.splice(bestIdx, 1); 
+              aggiuntoQualcuno = true;
+            } else { 
+              break; // Tempo finito per questa giornata
+            }
+          }
         }
+        
+        // Se non riesco più ad aggiungere elementi (es. giornata finita), mi fermo e passo al giorno dopo
+        if (!aggiuntoQualcuno) break; 
       }
     }
 
-    clientiDaPianificare.forEach(c => { clientiSospesiTmp.push({ ...c, motivoSospeso: "Tempo esaurito (Giornate Piene)" }); });
+    // Tutti i clienti rimasti nei cluster che non hanno trovato spazio nei giorni, finiscono in sospeso
+    clusters.forEach(cluster => {
+      cluster.forEach(c => {
+        clientiSospesiTmp.push({ ...c, motivoSospeso: "Tempo esaurito (Giornate Piene)" });
+      });
+    });
     
     const datiCombinati = [...eventiPregressiUI, ...clientiPianificati].sort((a, b) => {
         if (a.dataAssegnata !== b.dataAssegnata) return a.dataAssegnata.localeCompare(b.dataAssegnata);
@@ -1047,7 +1114,7 @@ Tecnico: ${tecnicoNome}`;
     <main className="min-h-screen bg-slate-100 text-slate-900 font-sans p-6 md:p-10 overflow-x-hidden print:hidden">
       <div className="max-w-7xl mx-auto">
         
-        {/* HEADER */}
+ {/* HEADER */}
         <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200 mb-8 gap-4">
           <div>
             <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-slate-900 flex items-center gap-3">
@@ -1058,6 +1125,15 @@ Tecnico: ${tecnicoNome}`;
           </div>
 
           <div className="flex flex-col gap-2 w-full md:w-auto">
+            
+            {/* TASTO DASHBOARD FLUSSI */}
+            <Link 
+              href="/flussi" 
+              className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-sm"
+            >
+              📊 Gestione Flussi & Richieste
+            </Link>
+
             <div className="flex items-center gap-4">
               {isCheckingAuth ? (
                 <div className="bg-slate-50 text-slate-500 px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 border border-slate-200 text-sm w-full"><Loader2 size={18} className="animate-spin text-blue-600" /> Verifica connessione...</div>
@@ -1176,7 +1252,7 @@ Tecnico: ${tecnicoNome}`;
                 </div>
               </div>
               <div className="w-full flex-1 rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
-                <iframe src={calendarEmbedUrl} style={{ border: 0 }} width="100%" height="100%" frameBorder="0" scrolling="no"></iframe>
+                <iframe key={tecnicoSelezionato.email} src={calendarEmbedUrl} style={{ border: 0 }} width="100%" height="100%" frameBorder="0" scrolling="no"></iframe>
               </div>
             </div>
           </div>
