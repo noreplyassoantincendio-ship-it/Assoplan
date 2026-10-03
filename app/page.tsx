@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import dynamic from "next/dynamic";
-import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database } from "lucide-react";
+import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database, Car, Home as HomeIcon } from "lucide-react";
 
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLayer), { ssr: false });
@@ -114,7 +114,6 @@ const calcolaDistanzaKm = (lat1: number, lon1: number, lat2: number, lon2: numbe
 };
 
 const calcolaTempoDistanzaGoogle = async (lat1: number, lon1: number, lat2: number, lon2: number) => {
-    // Evita chiamate inutili se i punti coincidono
     if (Math.abs(lat1 - lat2) < 0.0001 && Math.abs(lon1 - lon2) < 0.0001) {
         return { minuti: 0, km: 0 };
     }
@@ -124,7 +123,7 @@ const calcolaTempoDistanzaGoogle = async (lat1: number, lon1: number, lat2: numb
     const memoria = cacheSalvata ? JSON.parse(cacheSalvata) : {};
 
     if (memoria[cacheKey]) {
-        return memoria[cacheKey]; // Ritorna subito il dato salvato in cache (0 attesa, 0 chiamate)
+        return memoria[cacheKey]; 
     }
 
     try {
@@ -145,7 +144,6 @@ const calcolaTempoDistanzaGoogle = async (lat1: number, lon1: number, lat2: numb
         console.error("Errore Distance Matrix API:", e);
     }
     
-    // Fallback di emergenza se l'API non risponde: calcolo matematico
     const dist = calcolaDistanzaKm(lat1, lon1, lat2, lon2);
     return { minuti: Math.round(dist * 2), km: Number(dist.toFixed(1)) };
 };
@@ -440,6 +438,7 @@ Tecnico: ${tecnicoNome}`;
         
         let ultimaCoordGiorno: { lat: number; lng: number } | null = null;
         let furgone = 0; let piccoNegativo = 0; let totaleMovimenti = 0;
+        let ultimoCantiereGiorno = null;
 
         if (stat && stat.anchorLat) {
             ultimaCoordGiorno = { lat: stat.anchorLat, lng: stat.anchorLng };
@@ -450,6 +449,7 @@ Tecnico: ${tecnicoNome}`;
                 const [hEnd, mEnd] = c.oraFine.split(":").map(Number);
                 orarioCorrenteMinuti = Math.max(orarioCorrenteMinuti, (hEnd * 60 + mEnd) + 30);
                 if (c.lat && c.lng) ultimaCoordGiorno = { lat: c.lat, lng: c.lng };
+                ultimoCantiereGiorno = c;
             } else if (!c.selezionatoPerGiro) {
                 c.oraInizio = "-";
                 c.oraFine = "-";
@@ -466,17 +466,25 @@ Tecnico: ${tecnicoNome}`;
                 const hhEnd = String(Math.floor(fineLavoro / 60)).padStart(2, '0');
                 const mmEnd = String(fineLavoro % 60).padStart(2, '0');
 
+                c.minutiViaggioReale = minViaggio;
                 c.oraInizio = `${hhStart}:${mmStart}`;
                 c.oraFine = `${hhEnd}:${mmEnd}`;
 
                 orarioCorrenteMinuti = fineLavoro;
                 ultimaCoordGiorno = { lat: c.lat, lng: c.lng };
+                ultimoCantiereGiorno = c;
 
                 let delta = c.resoEstintori ? c.muletti_eorv : -c.muletti_eorv;
                 furgone += delta;
                 totaleMovimenti += c.muletti_eorv;
                 if (furgone < piccoNegativo) piccoNegativo = furgone;
             }
+        }
+        
+        // Calcolo del rientro stimato a fine giornata per l'ultimo cliente
+        if (ultimoCantiereGiorno && ultimaCoordGiorno) {
+            const { minuti: minRientro } = await calcolaTempoDistanzaGoogle(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG);
+            ultimoCantiereGiorno.minutiRientroSede = minRientro;
         }
 
         const targetStat = nuoveStats.find(s => s.dataStr === dataStr);
@@ -628,8 +636,6 @@ Tecnico: ${tecnicoNome}`;
       }
       if (c.resoEstintori && c.giorniDallUltimoSos < 5) { clientiSospesiTmp.push({ ...c, motivoSospeso: `SOS Bloccato (<5 gg)` }); continue; }
       
-      // RIMOSSO: Il blocco testuale per l'entroterra che forzava l'esclusione di Busalla/Ronco
-
       let minDistanzaAltra = Infinity;
       for (let j = 0; j < datiConCoordinate.length; j++) {
         if (i === j) continue;
@@ -1463,14 +1469,22 @@ Tecnico: ${tecnicoNome}`;
                             </div>
                           </td>
                           <td className="p-4">
-                            <span className="block text-[11px] text-slate-500 font-mono font-bold flex items-center gap-1.5 mb-1"><Clock size={12} className={intervento.isPregresso ? "text-indigo-500" : ""}/> {intervento.oraInizio} - {intervento.oraFine}</span>
-                            <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 w-max border border-emerald-100 mr-2"><Timer size={10} /> {intervento.minutiLavoro} min {intervento.isPregresso ? 'stimati' : 'lavoro'}</span>
-                            {!intervento.isPregresso && intervento.resoEstintori && (
-                               <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 w-max border border-blue-200">Muletti: +{intervento.muletti_eorv}</span>
+                            {!intervento.isPregresso && intervento.minutiViaggioReale !== undefined && (
+                               <span className="block text-[10px] text-blue-600 font-bold mb-1.5 flex items-center gap-1"><Car size={12}/> Trasferimento: {intervento.minutiViaggioReale} min</span>
                             )}
-                            {!intervento.isPregresso && !intervento.resoEstintori && (
-                               <span className="bg-amber-50 text-amber-700 px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 w-max border border-amber-200">Muletti: -{intervento.muletti_eorv}</span>
+                            <span className="block text-[11px] text-slate-500 font-mono font-bold flex items-center gap-1.5 mb-1.5"><Clock size={12} className={intervento.isPregresso ? "text-indigo-500" : ""}/> {intervento.oraInizio} - {intervento.oraFine}</span>
+                            {intervento.minutiRientroSede !== undefined && (
+                               <span className="block text-[10px] text-purple-600 font-bold mt-1.5 flex items-center gap-1"><HomeIcon size={12}/> Rientro stimato: {intervento.minutiRientroSede} min</span>
                             )}
+                            <div className="flex gap-1.5 mt-2">
+                               <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 w-max border border-emerald-100"><Timer size={10} /> {intervento.minutiLavoro} min {intervento.isPregresso ? 'stimati' : 'lavoro'}</span>
+                               {!intervento.isPregresso && intervento.resoEstintori && (
+                                  <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 w-max border border-blue-200">Muletti: +{intervento.muletti_eorv}</span>
+                               )}
+                               {!intervento.isPregresso && !intervento.resoEstintori && (
+                                  <span className="bg-amber-50 text-amber-700 px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 w-max border border-amber-200">Muletti: -{intervento.muletti_eorv}</span>
+                               )}
+                            </div>
                           </td>
                           <td className="p-4 text-center">
                              {!intervento.isPregresso && intervento.syncedToGoogle && (
@@ -1675,8 +1689,14 @@ Tecnico: ${tecnicoNome}`;
                               {lavoro.isPregresso ? "*" : lavoro.numProgressivo}
                             </td>
                             <td className="py-4 align-top">
+                              {!lavoro.isPregresso && lavoro.minutiViaggioReale !== undefined && (
+                                 <span className="text-[10px] text-gray-500 font-bold block mb-1 flex items-center gap-1"><Car size={10}/> +{lavoro.minutiViaggioReale} min</span>
+                              )}
                               <span className="font-extrabold text-sm">{lavoro.oraInizio}</span>
                               <br/><span className="text-xs text-gray-500">{lavoro.oraFine}</span>
+                              {lavoro.minutiRientroSede !== undefined && (
+                                 <span className="text-[10px] text-gray-500 font-bold block mt-1 flex items-center gap-1"><HomeIcon size={10}/> ~{lavoro.minutiRientroSede} min a sede</span>
+                              )}
                             </td>
                             <td className="py-4 align-top font-mono font-bold text-sm">
                               {lavoro.numeroBi}
