@@ -19,6 +19,9 @@ const FINE_GIORNATA_ASSOLUTA = 18 * 60; // 18:00 limite max assoluto
 const INIZIO_PAUSA = 12 * 60 + 30; // 12:30
 const FINE_PAUSA = 14 * 60; // 14:00
 const DURATA_PAUSA = 90;
+const GOOGLE_MAPS_API_KEY = "AIzaSyBLfAmnm_kaHbUc0sAVzhvkwXDF14EFCro";
+const SEDE_UFFICIO_LAT = 44.4056;
+const SEDE_UFFICIO_LNG = 8.9463;
 
 const formattaDataVisuale = (dataStr: string) => {
   if (!dataStr) return "";
@@ -87,7 +90,7 @@ const elaboraFileExcelGenerico = (file: File, callback: (righe: any[]) => void) 
 };
 
 const calcolaTempistiche = (orarioPartenza: number, minViaggio: number, minutiLavoro: number) => {
-    let inizioLavoro = orarioPartenza + minViaggio;
+    let inizioLavoro = Math.round(orarioPartenza + minViaggio);
     
     if (inizioLavoro >= INIZIO_PAUSA && inizioLavoro < FINE_PAUSA) {
         inizioLavoro = FINE_PAUSA;
@@ -100,6 +103,51 @@ const calcolaTempistiche = (orarioPartenza: number, minViaggio: number, minutiLa
     }
 
     return { inizioLavoro, fineLavoro };
+};
+
+const calcolaDistanzaKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * (Math.PI / 180);
+    const dLon = (lon2 - lon1) * (Math.PI / 180);
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+};
+
+const calcolaTempoDistanzaGoogle = async (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    // Evita chiamate inutili se i punti coincidono
+    if (Math.abs(lat1 - lat2) < 0.0001 && Math.abs(lon1 - lon2) < 0.0001) {
+        return { minuti: 0, km: 0 };
+    }
+
+    const cacheKey = `${lat1.toFixed(4)},${lon1.toFixed(4)}-${lat2.toFixed(4)},${lon2.toFixed(4)}`;
+    const cacheSalvata = localStorage.getItem("asso_routes_cache");
+    const memoria = cacheSalvata ? JSON.parse(cacheSalvata) : {};
+
+    if (memoria[cacheKey]) {
+        return memoria[cacheKey]; // Ritorna subito il dato salvato in cache (0 attesa, 0 chiamate)
+    }
+
+    try {
+        const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${lat1},${lon1}&destinations=${lat2},${lon2}&key=${GOOGLE_MAPS_API_KEY}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        
+        if (data.status === "OK" && data.rows[0].elements[0].status === "OK") {
+           const element = data.rows[0].elements[0];
+           const secondi = element.duration.value;
+           const metri = element.distance.value;
+           const risultato = { minuti: Math.round(secondi / 60), km: Number((metri / 1000).toFixed(1)) };
+           memoria[cacheKey] = risultato;
+           localStorage.setItem("asso_routes_cache", JSON.stringify(memoria));
+           return risultato;
+        }
+    } catch (e) {
+        console.error("Errore Distance Matrix API:", e);
+    }
+    
+    // Fallback di emergenza se l'API non risponde: calcolo matematico
+    const dist = calcolaDistanzaKm(lat1, lon1, lat2, lon2);
+    return { minuti: Math.round(dist * 2), km: Number(dist.toFixed(1)) };
 };
 
 export default function Home() {
@@ -219,18 +267,6 @@ export default function Home() {
     else document.body.style.overflow = "unset";
     return () => { document.body.style.overflow = "unset"; };
   }, [clienteSelezionatoScheda, sospesoInModifica]);
-
-  const GOOGLE_MAPS_API_KEY = "AIzaSyBLfAmnm_kaHbUc0sAVzhvkwXDF14EFCro";
-  const SEDE_UFFICIO_LAT = 44.4056;
-  const SEDE_UFFICIO_LNG = 8.9463;
-
-  const calcolaDistanzaKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-    const R = 6371;
-    const dLat = (lat2 - lat1) * (Math.PI / 180);
-    const dLon = (lon2 - lon1) * (Math.PI / 180);
-    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
-  };
 
   const trovaCoordinateGoogle = async (indirizzo: string, localita: string) => {
     let cleanAddr = indirizzo.replace(/Nessun indirizzo valido letto/gi, '').trim();
@@ -385,7 +421,7 @@ https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${clien
 Tecnico: ${tecnicoNome}`;
   };
 
-  const ricalcolaDistinteEOrari = (listaDaOrdinare: any[], statsLocali: any[] = giornateStats) => {
+  const ricalcolaDistinteEOrari = async (listaDaOrdinare: any[], statsLocali: any[] = giornateStats) => {
       const listaPulita = listaDaOrdinare.filter(i => !i.isDistinta);
       const mapGiorni = new Map();
       const vecchieDistinte = listaDaOrdinare.filter(i => i.isDistinta);
@@ -398,7 +434,7 @@ Tecnico: ${tecnicoNome}`;
 
       const nuovaLista: any[] = [];
 
-      mapGiorni.forEach((interventiGiorno, dataStr) => {
+      for (const [dataStr, interventiGiorno] of Array.from(mapGiorni.entries())) {
         const stat = statsLocali.find(g => g.dataStr === dataStr);
         let orarioCorrenteMinuti = stat && stat.orarioPartenzaMinuti ? stat.orarioPartenzaMinuti : 8 * 60;
         
@@ -409,7 +445,7 @@ Tecnico: ${tecnicoNome}`;
             ultimaCoordGiorno = { lat: stat.anchorLat, lng: stat.anchorLng };
         }
 
-        interventiGiorno.forEach((c: any) => {
+        for (const c of interventiGiorno) {
             if (c.isPregresso) {
                 const [hEnd, mEnd] = c.oraFine.split(":").map(Number);
                 orarioCorrenteMinuti = Math.max(orarioCorrenteMinuti, (hEnd * 60 + mEnd) + 30);
@@ -419,8 +455,9 @@ Tecnico: ${tecnicoNome}`;
                 c.oraFine = "-";
             } else {
                 const puntoPartenza = ultimaCoordGiorno || { lat: SEDE_UFFICIO_LAT, lng: SEDE_UFFICIO_LNG };
-                const dist = calcolaDistanzaKm(puntoPartenza.lat, puntoPartenza.lng, c.lat, c.lng);
-                const minViaggio = Math.round(dist * 2);
+                
+                // Chiamata Google per ricalcolare i minuti veri
+                const { minuti: minViaggio } = await calcolaTempoDistanzaGoogle(puntoPartenza.lat, puntoPartenza.lng, c.lat, c.lng);
 
                 const { inizioLavoro, fineLavoro } = calcolaTempistiche(orarioCorrenteMinuti, minViaggio, c.minutiLavoro);
 
@@ -440,7 +477,7 @@ Tecnico: ${tecnicoNome}`;
                 totaleMovimenti += c.muletti_eorv;
                 if (furgone < piccoNegativo) piccoNegativo = furgone;
             }
-        });
+        }
 
         const targetStat = nuoveStats.find(s => s.dataStr === dataStr);
         if (targetStat) {
@@ -468,7 +505,7 @@ Tecnico: ${tecnicoNome}`;
         };
 
         nuovaLista.push(distintaObj, ...interventiGiorno);
-      });
+      }
 
       return { listaOrdinata: nuovaLista, statsAggiornate: nuoveStats };
   };
@@ -591,8 +628,7 @@ Tecnico: ${tecnicoNome}`;
       }
       if (c.resoEstintori && c.giorniDallUltimoSos < 5) { clientiSospesiTmp.push({ ...c, motivoSospeso: `SOS Bloccato (<5 gg)` }); continue; }
       
-      const txt = `${c.indirizzo} ${c.localita} ${c.nome}`.toUpperCase();
-      if (txt.match(/RONCO SCRIVIA|BUSALLA|SAVIGNONE|ISOLA DEL CANTONE|MELE|MASONE|CAMPO LIGURE/)) { clientiSospesiTmp.push({ ...c, motivoSospeso: "Entroterra / Fuori Zona" }); continue; }
+      // RIMOSSO: Il blocco testuale per l'entroterra che forzava l'esclusione di Busalla/Ronco
 
       let minDistanzaAltra = Infinity;
       for (let j = 0; j < datiConCoordinate.length; j++) {
@@ -630,19 +666,18 @@ Tecnico: ${tecnicoNome}`;
     });
 
     // ==========================================
-    // FASE A: Clustering a "Raggio Chiuso" (Anticatena)
+    // FASE A: Clustering a "Raggio Chiuso"
     // ==========================================
     const clusters: any[][] = [];
     const unassigned = [...clientiDaPianificare];
-    const RAGGIO_MAX_CLUSTER_KM = 2.5; // Massimo 2.5 km dal centro esatto del gruppo
+    const RAGGIO_MAX_CLUSTER_KM = 2.5;
 
     while (unassigned.length > 0) {
-      const seed = unassigned.shift(); // Elegge il primo cantiere come "Centro"
+      const seed = unassigned.shift(); 
       const cluster = [seed];
       
       for (let i = unassigned.length - 1; i >= 0; i--) {
         const c = unassigned[i];
-        // Calcola la distanza dal centro, NON dagli altri elementi (spezza la catena)
         const dist = calcolaDistanzaKm(seed.lat, seed.lng, c.lat, c.lng);
         if (dist <= RAGGIO_MAX_CLUSTER_KM) {
           cluster.push(c);
@@ -651,12 +686,10 @@ Tecnico: ${tecnicoNome}`;
       }
       clusters.push(cluster);
     }
-
-    // Ordiniamo i cluster per dimensione: le macchie più grosse riempiono le giornate per prime
     clusters.sort((a, b) => b.length - a.length);
 
     // ==========================================
-    // FASE B e C: Assegnazione Blocchi & Micro-Routing
+    // FASE B e C: Assegnazione Blocchi & Micro-Routing Stradale
     // ==========================================
     const clientiPianificati = [];
 
@@ -668,12 +701,12 @@ Tecnico: ${tecnicoNome}`;
         : { lat: SEDE_UFFICIO_LAT, lng: SEDE_UFFICIO_LNG };
         
       let orarioAttualeSimulato = giornata.orarioPartenzaMinuti; 
+      let isPrimoInterventoDelGiorno = true;
       
       while (true) {
         let bestClusterIdx = -1;
         let minClusterDist = Infinity;
         
-        // Trova il cluster ("la macchia") geograficamente più vicina all'ultimo punto visitato
         for (let i = 0; i < clusters.length; i++) {
           if (clusters[i].length === 0) continue;
           const distToCluster = Math.min(...clusters[i].map(c => calcolaDistanzaKm(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, c.lat, c.lng)));
@@ -683,30 +716,48 @@ Tecnico: ${tecnicoNome}`;
           }
         }
         
-        if (bestClusterIdx === -1) break; // Non ci sono più cluster
+        if (bestClusterIdx === -1) break; 
         
+        // ZONE LOCKING: Blocca il salto di macchia se è troppo distante (es. Busalla -> Arenzano)
+        if (!isPrimoInterventoDelGiorno && minClusterDist > 15) {
+            break; // Salto inaccettabile (oltre 15km), dichiara chiusa questa giornata
+        }
+
         const activeCluster = clusters[bestClusterIdx];
         let aggiuntoQualcuno = false;
+        
+        // CAPOLINEA: Se si parte dalla sede, individua il cliente più LONTANO per iniziare e poi rientrare a cascata
+        let seedIdx = -1;
+        if (isPrimoInterventoDelGiorno && giornata.anchorLat === null) {
+             let maxDist = -1;
+             for(let i = 0; i < activeCluster.length; i++) {
+                 const distDaSede = calcolaDistanzaKm(SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG, activeCluster[i].lat, activeCluster[i].lng);
+                 if(distDaSede > maxDist) { maxDist = distDaSede; seedIdx = i; }
+             }
+        }
 
-        // Routing interno al cluster (Nearest Neighbor LOCALE alla zona scelta)
         while (activeCluster.length > 0) {
-          let bestIdx = -1; 
-          let minDistanza = Infinity;
-
-          for (let i = 0; i < activeCluster.length; i++) {
-            const c = activeCluster[i];
-            const dist = calcolaDistanzaKm(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, c.lat, c.lng);
-            if (dist < minDistanza) { minDistanza = dist; bestIdx = i; }
+          let bestIdx = seedIdx; 
+          
+          if (bestIdx === -1) {
+              let minDistanza = Infinity;
+              for (let i = 0; i < activeCluster.length; i++) {
+                const c = activeCluster[i];
+                const dist = calcolaDistanzaKm(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, c.lat, c.lng);
+                if (dist < minDistanza) { minDistanza = dist; bestIdx = i; }
+              }
           }
+          seedIdx = -1; // Consumato dopo il capolinea
 
           if (bestIdx !== -1) {
             const candidato = activeCluster[bestIdx];
-            const minViaggio = Math.round(minDistanza * 2);
-            const minRientro = Math.round(calcolaDistanzaKm(candidato.lat, candidato.lng, SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG) * 2);
+            
+            // CHIAMATA API GOOGLE REALE PER I MINUTI STRADALI
+            const { minuti: minViaggio } = await calcolaTempoDistanzaGoogle(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, candidato.lat, candidato.lng);
+            const { minuti: minRientro } = await calcolaTempoDistanzaGoogle(candidato.lat, candidato.lng, SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG);
             
             const { inizioLavoro, fineLavoro } = calcolaTempistiche(orarioAttualeSimulato, minViaggio, candidato.minutiLavoro);
 
-            // Verifica se nel turno di oggi c'è tempo per fare il viaggio, lavorare e rientrare
             if ((fineLavoro + minRientro) <= FINE_GIORNATA_ASSOLUTA) {
               clientiPianificati.push({ 
                   ...candidato, 
@@ -718,21 +769,20 @@ Tecnico: ${tecnicoNome}`;
               ultimaCoordGiorno = { lat: candidato.lat, lng: candidato.lng };
               activeCluster.splice(bestIdx, 1); 
               aggiuntoQualcuno = true;
+              isPrimoInterventoDelGiorno = false;
             } else { 
-              break; // Tempo finito per questa giornata
+              break; 
             }
           }
         }
         
-        // Se non riesco più ad aggiungere elementi (es. giornata finita), mi fermo e passo al giorno dopo
         if (!aggiuntoQualcuno) break; 
       }
     }
 
-    // Tutti i clienti rimasti nei cluster che non hanno trovato spazio nei giorni, finiscono in sospeso
     clusters.forEach(cluster => {
       cluster.forEach(c => {
-        clientiSospesiTmp.push({ ...c, motivoSospeso: "Tempo esaurito (Giornate Piene)" });
+        clientiSospesiTmp.push({ ...c, motivoSospeso: "Tempo esaurito (Giornate Piene / Limite Distanza)" });
       });
     });
     
@@ -744,7 +794,7 @@ Tecnico: ${tecnicoNome}`;
         return 0;
     });
 
-    const res = ricalcolaDistinteEOrari(datiCombinati, giornateStrutturate);
+    const res = await ricalcolaDistinteEOrari(datiCombinati, giornateStrutturate);
     setInterventiGrezzi(res.listaOrdinata);
     setGiornateStats(res.statsAggiornate);
     setClientiInSospeso(clientiSospesiTmp);
@@ -752,23 +802,23 @@ Tecnico: ${tecnicoNome}`;
     setInElaborazione(false);
   };
 
-  const toggleSelezioneCliente = (codice: string) => { 
+  const toggleSelezioneCliente = async (codice: string) => { 
     const nuovi = [...interventiGrezzi]; 
     const idx = nuovi.findIndex(i => i.codice === codice);
     if(idx !== -1) {
       nuovi[idx].selezionatoPerGiro = !nuovi[idx].selezionatoPerGiro; 
-      const resRic = ricalcolaDistinteEOrari(nuovi, giornateStats);
+      const resRic = await ricalcolaDistinteEOrari(nuovi, giornateStats);
       setInterventiGrezzi(resRic.listaOrdinata);
       setGiornateStats(resRic.statsAggiornate);
     }
   };
 
-  const rimuoviDaGiornata = (codice: string) => {
+  const rimuoviDaGiornata = async (codice: string) => {
     const itemToRemove = interventiGrezzi.find(i => i.codice === codice);
     if (!itemToRemove) return;
     const nuoviGrezzi = interventiGrezzi.filter(i => i.codice !== codice);
     setClientiInSospeso(prev => [...prev, { ...itemToRemove, motivoSospeso: "Rimosso manualmente", selezionatoPerGiro: true }]);
-    const resRic = ricalcolaDistinteEOrari(nuoviGrezzi, giornateStats);
+    const resRic = await ricalcolaDistinteEOrari(nuoviGrezzi, giornateStats);
     setInterventiGrezzi(resRic.listaOrdinata);
     setGiornateStats(resRic.statsAggiornate);
   };
@@ -781,12 +831,10 @@ Tecnico: ${tecnicoNome}`;
     const nomeFileLower = file.name.toLowerCase();
     setNomeFileCorrente(file.name);
     
-    // LOGICA MIGLIORATA PER SELEZIONE AUTOMATICA TECNICO
     let matchTrovato = false;
     for (const tech of tecniciAnagrafica) {
       const paroleNome = tech.nome.toLowerCase().split(" ");
       for (const parola of paroleNome) {
-        // Cerca parole lunghe più di 3 lettere (evita di matchare articoli o iniziali)
         if (parola.length > 3 && nomeFileLower.includes(parola)) {
           setTecnicoSelezionato(tech);
           matchTrovato = true;
@@ -911,7 +959,7 @@ Tecnico: ${tecnicoNome}`;
           const giornoScelto = getNomeGiorno(conf.data);
           const newClient = { ...clienteSospeso, settimana: `${formattaDataVisuale(dataInizio)} al ${formattaDataVisuale(dataFine)}`, giorno: giornoScelto, dataAssegnata: conf.data, oraInizio: conf.oraInizio, oraFine: `${hhEnd}:${mmEnd}`, selezionatoPerGiro: true, syncedToGoogle: true };
           
-          const resRic = ricalcolaDistinteEOrari([...interventiGrezzi, newClient], giornateStats);
+          const resRic = await ricalcolaDistinteEOrari([...interventiGrezzi, newClient], giornateStats);
           setInterventiGrezzi(resRic.listaOrdinata);
           setGiornateStats(resRic.statsAggiornate);
           
@@ -927,7 +975,7 @@ Tecnico: ${tecnicoNome}`;
 
       const newClient = { ...clienteSospeso, settimana: `${formattaDataVisuale(dataInizio)} al ${formattaDataVisuale(dataFine)}`, giorno: getNomeGiorno(conf.data), dataAssegnata: conf.data, oraInizio: conf.oraInizio, oraFine: `${hhEnd}:${mmEnd}`, selezionatoPerGiro: true, syncedToGoogle: false };
       
-      const resRic = ricalcolaDistinteEOrari([...interventiGrezzi, newClient], giornateStats);
+      const resRic = await ricalcolaDistinteEOrari([...interventiGrezzi, newClient], giornateStats);
       setInterventiGrezzi(resRic.listaOrdinata);
       setGiornateStats(resRic.statsAggiornate);
       
@@ -979,25 +1027,23 @@ Tecnico: ${tecnicoNome}`;
   const handleDragStartReorder = (e: React.DragEvent, codice: string) => { e.dataTransfer.setData("application/reorder-lista", codice); };
   const handleDragOverReorder = (e: React.DragEvent) => { e.preventDefault(); };
 
-  const handleDropReorder = (e: React.DragEvent, targetCodice: string) => {
+  const handleDropReorder = async (e: React.DragEvent, targetCodice: string) => {
     e.preventDefault();
     const draggedCodice = e.dataTransfer.getData("application/reorder-lista");
     if (!draggedCodice || draggedCodice === targetCodice) return;
 
-    setInterventiGrezzi(prev => {
-      const result = Array.from(prev);
-      const draggedIndex = result.findIndex(i => i.codice === draggedCodice);
-      const targetIndex = result.findIndex(i => i.codice === targetCodice);
+    const result = Array.from(interventiGrezzi);
+    const draggedIndex = result.findIndex(i => i.codice === draggedCodice);
+    const targetIndex = result.findIndex(i => i.codice === targetCodice);
 
-      if (draggedIndex === -1 || targetIndex === -1) return prev;
+    if (draggedIndex === -1 || targetIndex === -1) return;
 
-      const [removed] = result.splice(draggedIndex, 1);
-      result.splice(targetIndex, 0, removed);
+    const [removed] = result.splice(draggedIndex, 1);
+    result.splice(targetIndex, 0, removed);
 
-      const resRic = ricalcolaDistinteEOrari(result, giornateStats);
-      setGiornateStats(resRic.statsAggiornate);
-      return resRic.listaOrdinata;
-    });
+    const resRic = await ricalcolaDistinteEOrari(result, giornateStats);
+    setGiornateStats(resRic.statsAggiornate);
+    setInterventiGrezzi(resRic.listaOrdinata);
   };
 
   const createNumberedIcon = (numero: number) => {
@@ -1195,7 +1241,7 @@ Tecnico: ${tecnicoNome}`;
           <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between items-center text-center">
              <div className="w-full">
                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center justify-center gap-2 mb-2"><PlayCircle className="text-emerald-600" size={18} /> 3. Avvio Analisi Automatica</h2>
-               <p className="text-xs text-slate-500 mb-4">Incrocia percorsi, pausa pranzo 12:30-14:00, orari e interventi pregressi.</p>
+               <p className="text-xs text-slate-500 mb-4">Incrocia percorsi stradali veri, pausa pranzo dinamica e incastri ottimali.</p>
              </div>
              
              <div className="w-full flex flex-col gap-3 mt-auto">
@@ -1204,7 +1250,7 @@ Tecnico: ${tecnicoNome}`;
                    disabled={datiGrezziCaricati.length === 0 || inElaborazione}
                    className={`w-full py-3 px-4 rounded-xl text-sm font-extrabold transition-all flex items-center justify-center gap-2 ${(datiGrezziCaricati.length > 0 && !inElaborazione) ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-md' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
                  >
-                   {inElaborazione ? <><Loader2 size={16} className="animate-spin"/> Elaborazione...</> : <><Sliders size={16} /> Analizza & Crea Orari</>}
+                   {inElaborazione ? <><Loader2 size={16} className="animate-spin"/> Elaborazione in corso...</> : <><Sliders size={16} /> Analizza & Crea Orari</>}
                  </button>
                  
                  <label className="w-full py-2.5 px-4 rounded-xl text-[12px] font-bold transition-all flex items-center justify-center gap-2 border border-indigo-700 cursor-pointer bg-indigo-600 text-white hover:bg-indigo-700 shadow-md">
@@ -1239,7 +1285,8 @@ Tecnico: ${tecnicoNome}`;
                         <h4 className="font-bold text-slate-900 text-[11px] leading-tight mt-1">{s.nome}</h4>
                         <p className="text-[10px] text-slate-500 truncate mt-0.5">{s.indirizzo}</p>
                         {isSosBloccato && <span className="text-[9px] text-red-600 font-bold flex items-start gap-1 leading-tight mt-1"><AlertTriangle size={10} className="flex-shrink-0" /> {s.motivoSospeso}</span>}
-                        {!isSosBloccato && s.motivoSospeso === "Tempo esaurito (Giornate Piene)" && <span className="text-[9px] text-amber-600 font-bold flex items-start gap-1 leading-tight mt-1"><AlertTriangle size={10} className="flex-shrink-0" /> Turni esauriti</span>}
+                        {!isSosBloccato && s.motivoSospeso.includes("Tempo esaurito") && <span className="text-[9px] text-amber-600 font-bold flex items-start gap-1 leading-tight mt-1"><AlertTriangle size={10} className="flex-shrink-0" /> Turno fine / Lontano</span>}
+                        {!isSosBloccato && !s.motivoSospeso.includes("Tempo esaurito") && <span className="text-[9px] text-red-600 font-bold flex items-start gap-1 leading-tight mt-1"><AlertTriangle size={10} className="flex-shrink-0" /> {s.motivoSospeso}</span>}
                     </div>
                   );
               })}
@@ -1377,7 +1424,7 @@ Tecnico: ${tecnicoNome}`;
                           onDragOver={handleDragOverReorder}
                           onDrop={(e) => handleDropReorder(e, intervento.codice)}
                           className={`hover:bg-slate-50 transition-colors cursor-grab active:cursor-grabbing ${!intervento.selezionatoPerGiro ? 'opacity-40 bg-slate-50/80' : ''} ${intervento.isPregresso ? 'bg-indigo-50/30' : ''}`}
-                          title="Trascina per riordinare e ricalcolare i tempi"
+                          title="Trascina per riordinare e ricalcolare i tempi veri di Google Maps"
                         >
                           <td className="p-4 text-center text-slate-300 hover:text-slate-500 align-middle">
                             <GripVertical size={20} className="mx-auto" />
