@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import dynamic from "next/dynamic";
-import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database, Car, Home as HomeIcon } from "lucide-react";
+import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database, Car } from "lucide-react";
 
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLayer), { ssr: false });
@@ -122,9 +122,7 @@ const calcolaTempoDistanzaGoogle = async (lat1: number, lon1: number, lat2: numb
     const cacheSalvata = localStorage.getItem("asso_routes_cache");
     const memoria = cacheSalvata ? JSON.parse(cacheSalvata) : {};
 
-    if (memoria[cacheKey]) {
-        return memoria[cacheKey]; 
-    }
+    if (memoria[cacheKey]) return memoria[cacheKey];
 
     try {
         const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${lat1},${lon1}&destinations=${lat2},${lon2}&key=${GOOGLE_MAPS_API_KEY}`;
@@ -438,7 +436,7 @@ Tecnico: ${tecnicoNome}`;
         
         let ultimaCoordGiorno: { lat: number; lng: number } | null = null;
         let furgone = 0; let piccoNegativo = 0; let totaleMovimenti = 0;
-        let ultimoCantiereGiorno = null;
+        let prevCliente: any = null;
 
         if (stat && stat.anchorLat) {
             ultimaCoordGiorno = { lat: stat.anchorLat, lng: stat.anchorLng };
@@ -448,16 +446,26 @@ Tecnico: ${tecnicoNome}`;
             if (c.isPregresso) {
                 const [hEnd, mEnd] = c.oraFine.split(":").map(Number);
                 orarioCorrenteMinuti = Math.max(orarioCorrenteMinuti, (hEnd * 60 + mEnd) + 30);
+                
+                if (prevCliente && ultimaCoordGiorno && c.lat && c.lng) {
+                    const { minuti } = await calcolaTempoDistanzaGoogle(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, c.lat, c.lng);
+                    prevCliente.minutiVersoProssimo = minuti;
+                    prevCliente.isRientroSede = false;
+                }
+                
                 if (c.lat && c.lng) ultimaCoordGiorno = { lat: c.lat, lng: c.lng };
-                ultimoCantiereGiorno = c;
+                prevCliente = c;
             } else if (!c.selezionatoPerGiro) {
                 c.oraInizio = "-";
                 c.oraFine = "-";
             } else {
                 const puntoPartenza = ultimaCoordGiorno || { lat: SEDE_UFFICIO_LAT, lng: SEDE_UFFICIO_LNG };
-                
-                // Chiamata Google per ricalcolare i minuti veri
                 const { minuti: minViaggio } = await calcolaTempoDistanzaGoogle(puntoPartenza.lat, puntoPartenza.lng, c.lat, c.lng);
+
+                if (prevCliente) {
+                    prevCliente.minutiVersoProssimo = minViaggio;
+                    prevCliente.isRientroSede = false;
+                }
 
                 const { inizioLavoro, fineLavoro } = calcolaTempistiche(orarioCorrenteMinuti, minViaggio, c.minutiLavoro);
 
@@ -466,13 +474,12 @@ Tecnico: ${tecnicoNome}`;
                 const hhEnd = String(Math.floor(fineLavoro / 60)).padStart(2, '0');
                 const mmEnd = String(fineLavoro % 60).padStart(2, '0');
 
-                c.minutiViaggioReale = minViaggio;
                 c.oraInizio = `${hhStart}:${mmStart}`;
                 c.oraFine = `${hhEnd}:${mmEnd}`;
 
                 orarioCorrenteMinuti = fineLavoro;
                 ultimaCoordGiorno = { lat: c.lat, lng: c.lng };
-                ultimoCantiereGiorno = c;
+                prevCliente = c;
 
                 let delta = c.resoEstintori ? c.muletti_eorv : -c.muletti_eorv;
                 furgone += delta;
@@ -480,11 +487,11 @@ Tecnico: ${tecnicoNome}`;
                 if (furgone < piccoNegativo) piccoNegativo = furgone;
             }
         }
-        
-        // Calcolo del rientro stimato a fine giornata per l'ultimo cliente
-        if (ultimoCantiereGiorno && ultimaCoordGiorno) {
-            const { minuti: minRientro } = await calcolaTempoDistanzaGoogle(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG);
-            ultimoCantiereGiorno.minutiRientroSede = minRientro;
+
+        if (prevCliente && ultimaCoordGiorno) {
+            const { minuti } = await calcolaTempoDistanzaGoogle(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG);
+            prevCliente.minutiVersoProssimo = minuti;
+            prevCliente.isRientroSede = true;
         }
 
         const targetStat = nuoveStats.find(s => s.dataStr === dataStr);
@@ -676,7 +683,7 @@ Tecnico: ${tecnicoNome}`;
     // ==========================================
     const clusters: any[][] = [];
     const unassigned = [...clientiDaPianificare];
-    const RAGGIO_MAX_CLUSTER_KM = 2.5;
+    const RAGGIO_MAX_CLUSTER_KM = 2.5; 
 
     while (unassigned.length > 0) {
       const seed = unassigned.shift(); 
@@ -695,7 +702,7 @@ Tecnico: ${tecnicoNome}`;
     clusters.sort((a, b) => b.length - a.length);
 
     // ==========================================
-    // FASE B e C: Assegnazione Blocchi & Micro-Routing Stradale
+    // FASE B e C: Assegnazione Blocchi & Micro-Routing
     // ==========================================
     const clientiPianificati = [];
 
@@ -723,16 +730,16 @@ Tecnico: ${tecnicoNome}`;
         }
         
         if (bestClusterIdx === -1) break; 
-        
-        // ZONE LOCKING: Blocca il salto di macchia se è troppo distante (es. Busalla -> Arenzano)
-        if (!isPrimoInterventoDelGiorno && minClusterDist > 15) {
-            break; // Salto inaccettabile (oltre 15km), dichiara chiusa questa giornata
-        }
 
+        // ZONE LOCKING
+        if (!isPrimoInterventoDelGiorno && minClusterDist > 15) {
+            break; 
+        }
+        
         const activeCluster = clusters[bestClusterIdx];
         let aggiuntoQualcuno = false;
-        
-        // CAPOLINEA: Se si parte dalla sede, individua il cliente più LONTANO per iniziare e poi rientrare a cascata
+
+        // CAPOLINEA
         let seedIdx = -1;
         if (isPrimoInterventoDelGiorno && giornata.anchorLat === null) {
              let maxDist = -1;
@@ -753,12 +760,10 @@ Tecnico: ${tecnicoNome}`;
                 if (dist < minDistanza) { minDistanza = dist; bestIdx = i; }
               }
           }
-          seedIdx = -1; // Consumato dopo il capolinea
+          seedIdx = -1;
 
           if (bestIdx !== -1) {
             const candidato = activeCluster[bestIdx];
-            
-            // CHIAMATA API GOOGLE REALE PER I MINUTI STRADALI
             const { minuti: minViaggio } = await calcolaTempoDistanzaGoogle(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, candidato.lat, candidato.lng);
             const { minuti: minRientro } = await calcolaTempoDistanzaGoogle(candidato.lat, candidato.lng, SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG);
             
@@ -788,7 +793,7 @@ Tecnico: ${tecnicoNome}`;
 
     clusters.forEach(cluster => {
       cluster.forEach(c => {
-        clientiSospesiTmp.push({ ...c, motivoSospeso: "Tempo esaurito (Giornate Piene / Limite Distanza)" });
+        clientiSospesiTmp.push({ ...c, motivoSospeso: "Tempo esaurito (Giornate Piene)" });
       });
     });
     
@@ -809,24 +814,34 @@ Tecnico: ${tecnicoNome}`;
   };
 
   const toggleSelezioneCliente = async (codice: string) => { 
-    const nuovi = [...interventiGrezzi]; 
-    const idx = nuovi.findIndex(i => i.codice === codice);
-    if(idx !== -1) {
-      nuovi[idx].selezionatoPerGiro = !nuovi[idx].selezionatoPerGiro; 
-      const resRic = await ricalcolaDistinteEOrari(nuovi, giornateStats);
-      setInterventiGrezzi(resRic.listaOrdinata);
-      setGiornateStats(resRic.statsAggiornate);
+    setInElaborazione(true);
+    try {
+        const nuovi = [...interventiGrezzi]; 
+        const idx = nuovi.findIndex(i => i.codice === codice);
+        if(idx !== -1) {
+          nuovi[idx].selezionatoPerGiro = !nuovi[idx].selezionatoPerGiro; 
+          const resRic = await ricalcolaDistinteEOrari(nuovi, giornateStats);
+          setInterventiGrezzi(resRic.listaOrdinata);
+          setGiornateStats(resRic.statsAggiornate);
+        }
+    } finally {
+        setInElaborazione(false);
     }
   };
 
   const rimuoviDaGiornata = async (codice: string) => {
-    const itemToRemove = interventiGrezzi.find(i => i.codice === codice);
-    if (!itemToRemove) return;
-    const nuoviGrezzi = interventiGrezzi.filter(i => i.codice !== codice);
-    setClientiInSospeso(prev => [...prev, { ...itemToRemove, motivoSospeso: "Rimosso manualmente", selezionatoPerGiro: true }]);
-    const resRic = await ricalcolaDistinteEOrari(nuoviGrezzi, giornateStats);
-    setInterventiGrezzi(resRic.listaOrdinata);
-    setGiornateStats(resRic.statsAggiornate);
+    setInElaborazione(true);
+    try {
+        const itemToRemove = interventiGrezzi.find(i => i.codice === codice);
+        if (!itemToRemove) return;
+        const nuoviGrezzi = interventiGrezzi.filter(i => i.codice !== codice);
+        setClientiInSospeso(prev => [...prev, { ...itemToRemove, motivoSospeso: "Rimosso manualmente", selezionatoPerGiro: true }]);
+        const resRic = await ricalcolaDistinteEOrari(nuoviGrezzi, giornateStats);
+        setInterventiGrezzi(resRic.listaOrdinata);
+        setGiornateStats(resRic.statsAggiornate);
+    } finally {
+        setInElaborazione(false);
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -965,9 +980,11 @@ Tecnico: ${tecnicoNome}`;
           const giornoScelto = getNomeGiorno(conf.data);
           const newClient = { ...clienteSospeso, settimana: `${formattaDataVisuale(dataInizio)} al ${formattaDataVisuale(dataFine)}`, giorno: giornoScelto, dataAssegnata: conf.data, oraInizio: conf.oraInizio, oraFine: `${hhEnd}:${mmEnd}`, selezionatoPerGiro: true, syncedToGoogle: true };
           
+          setInElaborazione(true);
           const resRic = await ricalcolaDistinteEOrari([...interventiGrezzi, newClient], giornateStats);
           setInterventiGrezzi(resRic.listaOrdinata);
           setGiornateStats(resRic.statsAggiornate);
+          setInElaborazione(false);
           
           setClientiInSospeso(prev => prev.filter(c => c.codice !== clienteSospeso.codice));
           setSospesoInModifica(null);
@@ -981,10 +998,12 @@ Tecnico: ${tecnicoNome}`;
 
       const newClient = { ...clienteSospeso, settimana: `${formattaDataVisuale(dataInizio)} al ${formattaDataVisuale(dataFine)}`, giorno: getNomeGiorno(conf.data), dataAssegnata: conf.data, oraInizio: conf.oraInizio, oraFine: `${hhEnd}:${mmEnd}`, selezionatoPerGiro: true, syncedToGoogle: false };
       
+      setInElaborazione(true);
       const resRic = await ricalcolaDistinteEOrari([...interventiGrezzi, newClient], giornateStats);
       setInterventiGrezzi(resRic.listaOrdinata);
       setGiornateStats(resRic.statsAggiornate);
-      
+      setInElaborazione(false);
+
       setClientiInSospeso(prev => prev.filter(c => c.codice !== clienteSospeso.codice));
       setSospesoInModifica(null);
     }
@@ -1038,18 +1057,26 @@ Tecnico: ${tecnicoNome}`;
     const draggedCodice = e.dataTransfer.getData("application/reorder-lista");
     if (!draggedCodice || draggedCodice === targetCodice) return;
 
-    const result = Array.from(interventiGrezzi);
-    const draggedIndex = result.findIndex(i => i.codice === draggedCodice);
-    const targetIndex = result.findIndex(i => i.codice === targetCodice);
+    setInElaborazione(true);
+    try {
+        const result = Array.from(interventiGrezzi);
+        const draggedIndex = result.findIndex(i => i.codice === draggedCodice);
+        const targetIndex = result.findIndex(i => i.codice === targetCodice);
 
-    if (draggedIndex === -1 || targetIndex === -1) return;
+        if (draggedIndex === -1 || targetIndex === -1) {
+            setInElaborazione(false);
+            return;
+        }
 
-    const [removed] = result.splice(draggedIndex, 1);
-    result.splice(targetIndex, 0, removed);
+        const [removed] = result.splice(draggedIndex, 1);
+        result.splice(targetIndex, 0, removed);
 
-    const resRic = await ricalcolaDistinteEOrari(result, giornateStats);
-    setGiornateStats(resRic.statsAggiornate);
-    setInterventiGrezzi(resRic.listaOrdinata);
+        const resRic = await ricalcolaDistinteEOrari(result, giornateStats);
+        setGiornateStats(resRic.statsAggiornate);
+        setInterventiGrezzi(resRic.listaOrdinata);
+    } finally {
+        setInElaborazione(false);
+    }
   };
 
   const createNumberedIcon = (numero: number) => {
@@ -1316,7 +1343,7 @@ Tecnico: ${tecnicoNome}`;
         </div>
 
         {/* BOX RIEPILOGO PIANIFICAZIONE */}
-        {interventiGrezzi.length > 0 && leafletLoaded && !inElaborazione && (
+        {interventiGrezzi.length > 0 && leafletLoaded && (
           <div className="w-full flex flex-col gap-6 mb-8">
              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col lg:flex-row gap-8 items-start">
                 <div className="flex-1 w-full">
@@ -1338,7 +1365,7 @@ Tecnico: ${tecnicoNome}`;
                          </div>
                       </div>
                     ) : (
-                      <button onClick={inviaPianificazioneAGoogle} className="w-full md:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md text-xs transition-all">
+                      <button onClick={inviaPianificazioneAGoogle} disabled={inElaborazione} className="w-full md:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md text-xs transition-all disabled:opacity-50 disabled:cursor-not-allowed">
                         <UploadCloud size={16} /> Invia a Google ({interventiGrezzi.filter(i => i.selezionatoPerGiro && !i.syncedToGoogle && !i.isPregresso).length} pronti)
                       </button>
                     )}
@@ -1375,10 +1402,16 @@ Tecnico: ${tecnicoNome}`;
         )}
 
         {/* TABELLA E MAPPA */}
-        {interventiGrezzi.length > 0 && leafletLoaded && !inElaborazione && (
+        {interventiGrezzi.length > 0 && leafletLoaded && (
           <div className="w-full flex flex-col gap-6">
             
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className={`bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative ${inElaborazione ? 'opacity-50 pointer-events-none' : ''}`}>
+              {inElaborazione && (
+                 <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/40 backdrop-blur-[2px]">
+                    <div className="bg-blue-600 text-white px-5 py-3 rounded-xl font-bold flex items-center gap-3 shadow-xl"><Loader2 size={20} className="animate-spin" /> Elaborazione rotte su Google Maps in corso...</div>
+                 </div>
+              )}
+              
               <div className="p-6 border-b border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
                 <div>
                   <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2"><Package className="text-blue-600"/> Lista Pianificati e Distinte | {tecnicoSelezionato.nome}</h3>
@@ -1469,17 +1502,22 @@ Tecnico: ${tecnicoNome}`;
                             </div>
                           </td>
                           <td className="p-4">
-                            {!intervento.isPregresso && intervento.minutiViaggioReale !== undefined && (
-                               <span className="block text-[10px] text-blue-600 font-bold mb-1.5 flex items-center gap-1"><Car size={12}/> Trasferimento: {intervento.minutiViaggioReale} min</span>
-                            )}
                             <span className="block text-[11px] text-slate-500 font-mono font-bold flex items-center gap-1.5 mb-1.5"><Clock size={12} className={intervento.isPregresso ? "text-indigo-500" : ""}/> {intervento.oraInizio} - {intervento.oraFine}</span>
-                            {intervento.minutiRientroSede !== undefined && (
-                               <span className="block text-[10px] text-purple-600 font-bold mt-1.5 flex items-center gap-1"><HomeIcon size={12}/> Rientro stimato: {intervento.minutiRientroSede} min</span>
-                            )}
-                            <div className="flex gap-1.5 mt-2">
-                               <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 w-max border border-emerald-100"><Timer size={10} /> {intervento.minutiLavoro} min {intervento.isPregresso ? 'stimati' : 'lavoro'}</span>
+                            
+                            <div className="flex gap-1.5 mt-1.5">
+                               <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 w-max border border-emerald-100">
+                                  <Timer size={10} /> {intervento.minutiLavoro} min {intervento.isPregresso ? 'stimati' : 'lavoro'}
+                               </span>
+                               {intervento.minutiVersoProssimo !== undefined && (intervento.selezionatoPerGiro || intervento.isPregresso) && (
+                                  <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 w-max border border-blue-200" title="Tempo di viaggio verso la prossima destinazione">
+                                     <Car size={10} /> +{intervento.minutiVersoProssimo} min {intervento.isRientroSede ? 'a Sede' : 'al prossimo'}
+                                  </span>
+                               )}
+                            </div>
+                            
+                            <div className="flex gap-1.5 mt-1.5">
                                {!intervento.isPregresso && intervento.resoEstintori && (
-                                  <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 w-max border border-blue-200">Muletti: +{intervento.muletti_eorv}</span>
+                                  <span className="bg-indigo-50 text-indigo-700 px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 w-max border border-indigo-200">Muletti: +{intervento.muletti_eorv}</span>
                                )}
                                {!intervento.isPregresso && !intervento.resoEstintori && (
                                   <span className="bg-amber-50 text-amber-700 px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 w-max border border-amber-200">Muletti: -{intervento.muletti_eorv}</span>
@@ -1503,7 +1541,7 @@ Tecnico: ${tecnicoNome}`;
               </div>
             </div>
 
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+            <div className={`bg-white p-6 rounded-2xl shadow-sm border border-slate-200 ${inElaborazione ? 'opacity-50 pointer-events-none' : ''}`}>
               <h3 className="text-base font-bold mb-4 flex items-center gap-2 text-slate-900"><MapPin className="text-red-500" /> Mappa Percorso Ordinato ({giornoSceltoFiltro === "Tutti" ? "Tutti i Giorni" : formattaDataVisuale(giornoSceltoFiltro)})</h3>
               <div className="h-[480px] w-full rounded-xl overflow-hidden z-0 border border-slate-100">
                 <MapContainer key={giornoSceltoFiltro} center={[SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG]} zoom={12} style={{ height: "100%", width: "100%" }}>
@@ -1689,13 +1727,12 @@ Tecnico: ${tecnicoNome}`;
                               {lavoro.isPregresso ? "*" : lavoro.numProgressivo}
                             </td>
                             <td className="py-4 align-top">
-                              {!lavoro.isPregresso && lavoro.minutiViaggioReale !== undefined && (
-                                 <span className="text-[10px] text-gray-500 font-bold block mb-1 flex items-center gap-1"><Car size={10}/> +{lavoro.minutiViaggioReale} min</span>
-                              )}
                               <span className="font-extrabold text-sm">{lavoro.oraInizio}</span>
                               <br/><span className="text-xs text-gray-500">{lavoro.oraFine}</span>
-                              {lavoro.minutiRientroSede !== undefined && (
-                                 <span className="text-[10px] text-gray-500 font-bold block mt-1 flex items-center gap-1"><HomeIcon size={10}/> ~{lavoro.minutiRientroSede} min a sede</span>
+                              {lavoro.minutiVersoProssimo !== undefined && (
+                                 <span className="text-[10px] text-gray-500 font-bold block mt-1 flex items-center gap-1">
+                                     <Car size={10}/> ~{lavoro.minutiVersoProssimo}m {lavoro.isRientroSede ? 'rientro' : 'per pros.'}
+                                 </span>
                               )}
                             </td>
                             <td className="py-4 align-top font-mono font-bold text-sm">
