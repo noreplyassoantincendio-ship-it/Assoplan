@@ -113,6 +113,26 @@ const calcolaDistanzaKm = (lat1: number, lon1: number, lat2: number, lon2: numbe
     return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 };
 
+let googleMapsPromise: Promise<void> | null = null;
+const loadGoogleMapsAPI = () => {
+    if (googleMapsPromise) return googleMapsPromise;
+    // @ts-ignore
+    if (typeof window !== "undefined" && window.google && window.google.maps) {
+        googleMapsPromise = Promise.resolve();
+        return googleMapsPromise;
+    }
+    googleMapsPromise = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}`;
+        script.async = true;
+        script.defer = true;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error("Google Maps SDK failed to load"));
+        document.head.appendChild(script);
+    });
+    return googleMapsPromise;
+};
+
 const calcolaTempoDistanzaGoogle = async (lat1: number, lon1: number, lat2: number, lon2: number) => {
     if (Math.abs(lat1 - lat2) < 0.0001 && Math.abs(lon1 - lon2) < 0.0001) {
         return { minuti: 0, km: 0 };
@@ -125,12 +145,28 @@ const calcolaTempoDistanzaGoogle = async (lat1: number, lon1: number, lat2: numb
     if (memoria[cacheKey]) return memoria[cacheKey];
 
     try {
-        const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${lat1},${lon1}&destinations=${lat2},${lon2}&key=${GOOGLE_MAPS_API_KEY}`;
-        const res = await fetch(url);
-        const data = await res.json();
+        await loadGoogleMapsAPI();
+        // @ts-ignore
+        const service = new window.google.maps.DistanceMatrixService();
+        // @ts-ignore
+        const origin = new window.google.maps.LatLng(lat1, lon1);
+        // @ts-ignore
+        const destination = new window.google.maps.LatLng(lat2, lon2);
         
-        if (data.status === "OK" && data.rows[0].elements[0].status === "OK") {
-           const element = data.rows[0].elements[0];
+        const response: any = await new Promise((resolve, reject) => {
+            service.getDistanceMatrix({
+                origins: [origin],
+                destinations: [destination],
+                // @ts-ignore
+                travelMode: window.google.maps.TravelMode.DRIVING,
+            }, (res: any, status: any) => {
+                if (status === "OK") resolve(res);
+                else reject(status);
+            });
+        });
+
+        if (response && response.rows && response.rows[0] && response.rows[0].elements[0].status === "OK") {
+           const element = response.rows[0].elements[0];
            const secondi = element.duration.value;
            const metri = element.distance.value;
            const risultato = { minuti: Math.round(secondi / 60), km: Number((metri / 1000).toFixed(1)) };
@@ -139,9 +175,10 @@ const calcolaTempoDistanzaGoogle = async (lat1: number, lon1: number, lat2: numb
            return risultato;
         }
     } catch (e) {
-        console.error("Errore Distance Matrix API:", e);
+        console.error("Errore Distance Matrix API JS SDK:", e);
     }
     
+    // Fallback di emergenza se fallisce Google Maps
     const dist = calcolaDistanzaKm(lat1, lon1, lat2, lon2);
     return { minuti: Math.round(dist * 2), km: Number(dist.toFixed(1)) };
 };
@@ -453,6 +490,9 @@ Tecnico: ${tecnicoNome}`;
                     prevCliente.isRientroSede = false;
                 }
                 
+                c.minutiDaPrecedente = 0;
+                c.isPartenzaDaSede = !prevCliente;
+                
                 if (c.lat && c.lng) ultimaCoordGiorno = { lat: c.lat, lng: c.lng };
                 prevCliente = c;
             } else if (!c.selezionatoPerGiro) {
@@ -461,6 +501,9 @@ Tecnico: ${tecnicoNome}`;
             } else {
                 const puntoPartenza = ultimaCoordGiorno || { lat: SEDE_UFFICIO_LAT, lng: SEDE_UFFICIO_LNG };
                 const { minuti: minViaggio } = await calcolaTempoDistanzaGoogle(puntoPartenza.lat, puntoPartenza.lng, c.lat, c.lng);
+
+                c.minutiDaPrecedente = minViaggio;
+                c.isPartenzaDaSede = !prevCliente;
 
                 if (prevCliente) {
                     prevCliente.minutiVersoProssimo = minViaggio;
@@ -487,7 +530,7 @@ Tecnico: ${tecnicoNome}`;
                 if (furgone < piccoNegativo) piccoNegativo = furgone;
             }
         }
-
+        
         if (prevCliente && ultimaCoordGiorno) {
             const { minuti } = await calcolaTempoDistanzaGoogle(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG);
             prevCliente.minutiVersoProssimo = minuti;
@@ -678,9 +721,6 @@ Tecnico: ${tecnicoNome}`;
       return { ...g, minutiDisponibili, statoGiornata, anchorLat, anchorLng, orarioPartenzaMinuti: maxFineMinuti };
     });
 
-    // ==========================================
-    // FASE A: Clustering a "Raggio Chiuso"
-    // ==========================================
     const clusters: any[][] = [];
     const unassigned = [...clientiDaPianificare];
     const RAGGIO_MAX_CLUSTER_KM = 2.5; 
@@ -701,9 +741,6 @@ Tecnico: ${tecnicoNome}`;
     }
     clusters.sort((a, b) => b.length - a.length);
 
-    // ==========================================
-    // FASE B e C: Assegnazione Blocchi & Micro-Routing
-    // ==========================================
     const clientiPianificati = [];
 
     for (const giornata of giornateStrutturate) {
@@ -731,7 +768,6 @@ Tecnico: ${tecnicoNome}`;
         
         if (bestClusterIdx === -1) break; 
 
-        // ZONE LOCKING
         if (!isPrimoInterventoDelGiorno && minClusterDist > 15) {
             break; 
         }
@@ -739,7 +775,6 @@ Tecnico: ${tecnicoNome}`;
         const activeCluster = clusters[bestClusterIdx];
         let aggiuntoQualcuno = false;
 
-        // CAPOLINEA
         let seedIdx = -1;
         if (isPrimoInterventoDelGiorno && giornata.anchorLat === null) {
              let maxDist = -1;
@@ -793,7 +828,7 @@ Tecnico: ${tecnicoNome}`;
 
     clusters.forEach(cluster => {
       cluster.forEach(c => {
-        clientiSospesiTmp.push({ ...c, motivoSospeso: "Tempo esaurito (Giornate Piene)" });
+        clientiSospesiTmp.push({ ...c, motivoSospeso: "Tempo esaurito (Giornate Piene / Limite Distanza)" });
       });
     });
     
@@ -1508,9 +1543,14 @@ Tecnico: ${tecnicoNome}`;
                                <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 w-max border border-emerald-100">
                                   <Timer size={10} /> {intervento.minutiLavoro} min {intervento.isPregresso ? 'stimati' : 'lavoro'}
                                </span>
+                               {intervento.minutiDaPrecedente !== undefined && intervento.isPartenzaDaSede && (
+                                  <span className="bg-purple-50 text-purple-700 px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 w-max border border-purple-200" title="Tempo di viaggio dalla sede al primo cliente">
+                                     <Car size={10} /> +{intervento.minutiDaPrecedente}m da Sede
+                                  </span>
+                               )}
                                {intervento.minutiVersoProssimo !== undefined && (intervento.selezionatoPerGiro || intervento.isPregresso) && (
                                   <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 w-max border border-blue-200" title="Tempo di viaggio verso la prossima destinazione">
-                                     <Car size={10} /> +{intervento.minutiVersoProssimo} min {intervento.isRientroSede ? 'a Sede' : 'al prossimo'}
+                                     <Car size={10} /> +{intervento.minutiVersoProssimo}m {intervento.isRientroSede ? 'rientro sede' : 'al prossimo'}
                                   </span>
                                )}
                             </div>
@@ -1727,11 +1767,14 @@ Tecnico: ${tecnicoNome}`;
                               {lavoro.isPregresso ? "*" : lavoro.numProgressivo}
                             </td>
                             <td className="py-4 align-top">
+                              {lavoro.minutiDaPrecedente !== undefined && lavoro.isPartenzaDaSede && (
+                                 <span className="text-[10px] text-gray-500 font-bold block mb-1 flex items-center gap-1"><Car size={10}/> +{lavoro.minutiDaPrecedente}m da Sede</span>
+                              )}
                               <span className="font-extrabold text-sm">{lavoro.oraInizio}</span>
                               <br/><span className="text-xs text-gray-500">{lavoro.oraFine}</span>
                               {lavoro.minutiVersoProssimo !== undefined && (
                                  <span className="text-[10px] text-gray-500 font-bold block mt-1 flex items-center gap-1">
-                                     <Car size={10}/> ~{lavoro.minutiVersoProssimo}m {lavoro.isRientroSede ? 'rientro' : 'per pros.'}
+                                     <Car size={10}/> ~{lavoro.minutiVersoProssimo}m {lavoro.isRientroSede ? 'a sede' : 'per pros.'}
                                  </span>
                               )}
                             </td>
