@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "AQ.Ab8RN6JdFJwGZawOY7clIaO7BHsPTty2xwBN5gM3D_jyD7t4eQ";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 const SYSTEM_PROMPT = `
 Sei il direttore operativo esperto di Asso Antincendio, azienda di manutenzione presidi antincendio a Genova e in Liguria.
