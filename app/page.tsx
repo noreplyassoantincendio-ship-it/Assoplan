@@ -1,5 +1,6 @@
-'use-effect';
+'use client';
 import React, { useState } from 'react';
+import * as XLSX from 'xlsx';
 
 export default function AssoPlanDashboard() {
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -9,11 +10,54 @@ export default function AssoPlanDashboard() {
   ]);
   const [loading, setLoading] = useState(false);
   
-  // Stato simulato dei cantieri / pianificazione attuale
+  // Stato dei cantieri / pianificazione attuale (ereditato dalla struttura base)
   const [pianificazione, setPianificazione] = useState([
     { id: 1, titolo: '[INS] [DC] CONDOMINIO VIA VEZZANI 9A - BI 2593', localita: 'RIVAROLO', orario: '08:22 - 08:46', lavoro: '24 min', viaggio: '+22m da Sede', muletti: 0 },
     { id: 2, titolo: '[DC] GADO MED S.R.L. - BI 2351', localita: 'CORNIGLIANO', orario: '08:52 - 10:48', lavoro: '116 min', viaggio: '+17m rientro sede', muletti: -1 }
   ]);
+
+  // Gestione caricamento file Excel reale con libreria xlsx
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setLoading(true);
+    setMessages(prev => [...prev, { sender: 'ai', text: 'Sto leggendo il file Excel e analizzando le valli e i turni...' }]);
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const workbook = XLSX.read(bstr, { type: 'binary' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const rawData = XLSX.utils.sheet_to_json(worksheet);
+
+        // Chiamata al backend per la pianificazione iniziale tramite IA
+        const res = await fetch('/api/planner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'pianifica_iniziale',
+            datiGrezzi: rawData
+          })
+        });
+
+        const data = await res.json();
+        if (data.success && data.piano) {
+          setPianificazione(data.piano.interventi || []);
+          setMessages(prev => [...prev, { sender: 'ai', text: 'Pianificazione completata con successo! Guarda la tabella aggiornata.' }]);
+        } else {
+          setMessages(prev => [...prev, { sender: 'ai', text: 'Errore nell\'elaborazione dei dati da parte dell\'assistente.' }]);
+        }
+      } catch (error) {
+        setMessages(prev => [...prev, { sender: 'ai', text: 'Errore durante la lettura del file Excel.' }]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,7 +86,7 @@ export default function AssoPlanDashboard() {
           setPianificazione(data.piano.interventi);
         }
       } else {
-        setMessages(prev => [...prev, { sender: 'ai', text: 'Ho riscontrato un problema nell elaborare la richiesta. Riprova.' }]);
+        setMessages(prev => [...prev, { sender: 'ai', text: 'Ho riscontrato un problema nell\'elaborare la richiesta. Riprova.' }]);
       }
     } catch (err) {
       setMessages(prev => [...prev, { sender: 'ai', text: 'Errore di connessione con il server di pianificazione.' }]);
@@ -60,6 +104,12 @@ export default function AssoPlanDashboard() {
           <p className="text-xs text-slate-400">Pianificazione Intelligente & Logistica Territoriale (Genoa / Liguria)</p>
         </div>
         <div className="flex items-center gap-3">
+          {/* Pulsante Carica Excel integrato nella barra superiore */}
+          <label className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer transition shadow flex items-center gap-2">
+            📂 Carica Excel
+            <input type="file" accept=".xlsx, .xls" onChange={handleFileUpload} className="hidden" />
+          </label>
+
           <button 
             onClick={() => setIsChatOpen(!isChatOpen)}
             className="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition shadow"
@@ -106,7 +156,7 @@ export default function AssoPlanDashboard() {
                     <div className="col-span-3">
                       <p className="text-xs font-bold text-slate-700">🕒 {item.orario}</p>
                       <div className="flex gap-2 mt-1">
-                        <span className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded border border-emerald-200">🛠️️ {item.lavoro} lavoro</span>
+                        <span className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded border border-emerald-200">🛠 {item.lavoro} lavoro</span>
                         <span className="text-[10px] bg-purple-50 text-purple-700 px-2 py-0.5 rounded border border-purple-200">🚗 {item.viaggio}</span>
                       </div>
                     </div>
