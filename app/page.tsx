@@ -464,7 +464,7 @@ Tecnico: ${tecnicoNome}`;
         mapGiorni.get(i.dataAssegnata).push(i);
       });
 
-      const nuovaLista: any[] = [];
+      const nuovalista: any[] = [];
 
       for (const [dataStr, interventiGiorno] of Array.from(mapGiorni.entries())) {
         const stat = statsLocali.find(g => g.dataStr === dataStr);
@@ -561,10 +561,10 @@ Tecnico: ${tecnicoNome}`;
             codice: `DISTINTA_${dataStr}`, isDistinta: true, nome: `📦 DISTINTA DI CARICO (${formattaDataVisuale(dataStr)})`, numeroBi: "MAGAZZINO", indirizzo: "Sede Asso Antincendio", localita: "Genova", minutiLavoro: 60, giorno: primaRiga.giorno, dataAssegnata: dataStr, oraInizio: "07:00", oraFine: "08:00", descrizioneDistinta: descStr, selezionatoPerGiro: true, syncedToGoogle: oldDistinta ? oldDistinta.syncedToGoogle : false, lat: SEDE_UFFICIO_LAT, lng: SEDE_UFFICIO_LNG
         };
 
-        nuovaLista.push(distintaObj, ...interventiGiorno);
+        nuovalista.push(distintaObj, ...interventiGiorno);
       }
 
-      return { listaOrdinata: nuovaLista, statsAggiornate: nuoveStats };
+      return { listaOrdinata: nuovalista, statsAggiornate: nuoveStats };
   };
 
   const processaRighe = async (righe: any[]) => {
@@ -624,16 +624,10 @@ Tecnico: ${tecnicoNome}`;
       cliente._maxMt.rv = Math.max(cliente._maxMt.rv, Number(riga.eo_rv || riga.EO_RV) || 0);
     }
 
-    // FASE DI CORRISPONDENZA: Controllo se i totali Excel sono validi o se devo sommare le righe
     for (const cliente of Array.from(clientiMappa.values())) {
-        
         if (cliente.resoEstintori) {
-            // REGOLA RIGIDA SOS: L'unico dato certo sui resi è la colonna eo_rv.
-            // Ignoriamo la quantità perché potremmo restituire solo 1 pezzo su 100 fatturati.
             let veriMuletti = cliente._maxMt.rv || 0;
-            
             cliente.muletti_eorv = veriMuletti;
-            
             if (veriMuletti > 0) {
                 cliente.minutiLavoro = 20 + (veriMuletti * 2);
                 cliente.totaleArticoli = veriMuletti;
@@ -644,7 +638,6 @@ Tecnico: ${tecnicoNome}`;
                 cliente.dettaglioAttrezzature = [];
             }
         } else {
-            // MANUTENZIONE ORDINARIA: Applichiamo il paracadute di sicurezza se l'Excel esporta male
             let sumQtaEstintori = 0;
             let sumQtaPorte = 0;
             let sumQtaIdranti = 0;
@@ -667,7 +660,6 @@ Tecnico: ${tecnicoNome}`;
                 else if (d.includes("gruppo") || d.includes("pressurizzazion") || d.includes("pompe")) sumQtaGruppi += q;
             });
 
-            // Controllo di Corrispondenza: La colonna Excel è fallata se conta <=1 o 0, ma le righe dicono il contrario
             const usaRighe = (
                 (sumQtaEstintori > 0 && cliente._maxMt.eo <= 1 && sumQtaEstintori > 1) || 
                 (sumQtaPorte > 0 && cliente._maxMt.po === 0) ||
@@ -823,7 +815,7 @@ Tecnico: ${tecnicoNome}`;
 
     const clusters: any[][] = [];
     const unassigned = [...clientiDaPianificare];
-    const RAGGIO_MAX_CLUSTER_KM = 2.5; 
+    const RAGGIO_MAX_CLUSTER_KM = 3.5; // Leggermente ampliato per accorpare meglio le valli
 
     while (unassigned.length > 0) {
       const seed = unassigned.shift(); 
@@ -851,61 +843,39 @@ Tecnico: ${tecnicoNome}`;
         : { lat: SEDE_UFFICIO_LAT, lng: SEDE_UFFICIO_LNG };
         
       let orarioAttualeSimulato = giornata.orarioPartenzaMinuti; 
-      let isPrimoInterventoDelGiorno = true;
       
       while (true) {
         let bestClusterIdx = -1;
         let minClusterDist = Infinity;
         
-        if (isPrimoInterventoDelGiorno && giornata.anchorLat === null) {
-            for (let i = 0; i < clusters.length; i++) {
-                if (clusters[i].length > 0) {
-                    bestClusterIdx = i;
-                    minClusterDist = Math.min(...clusters[i].map(c => calcolaDistanzaKm(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, c.lat, c.lng)));
-                    break;
-                }
-            }
-        } else {
-            for (let i = 0; i < clusters.length; i++) {
-              if (clusters[i].length === 0) continue;
-              const distToCluster = Math.min(...clusters[i].map(c => calcolaDistanzaKm(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, c.lat, c.lng)));
-              if (distToCluster < minClusterDist) {
-                minClusterDist = distToCluster;
-                bestClusterIdx = i;
-              }
-            }
+        // CERCA SEMPRE LA MACCHIA PIU' VICINA SENZA LASCIARE BUCHI IN GIORNATA
+        for (let i = 0; i < clusters.length; i++) {
+          if (clusters[i].length === 0) continue;
+          const distToCluster = Math.min(...clusters[i].map(c => calcolaDistanzaKm(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, c.lat, c.lng)));
+          if (distToCluster < minClusterDist) {
+            minClusterDist = distToCluster;
+            bestClusterIdx = i;
+          }
         }
         
         if (bestClusterIdx === -1) break; 
 
-        if (!isPrimoInterventoDelGiorno && minClusterDist > 15) {
+        // Se la giornata ha ancora ore utili (più di 2 ore prima delle 18:00), riempiamo la giornata senza bloccarci.
+        if (orarioAttualeSimulato >= (16 * 60) && minClusterDist > 20) {
             break; 
         }
         
         const activeCluster = clusters[bestClusterIdx];
         let aggiuntoQualcuno = false;
 
-        let seedIdx = -1;
-        if (isPrimoInterventoDelGiorno && giornata.anchorLat === null) {
-             let maxDist = -1;
-             for(let i = 0; i < activeCluster.length; i++) {
-                 const distDaSede = calcolaDistanzaKm(SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG, activeCluster[i].lat, activeCluster[i].lng);
-                 if(distDaSede > maxDist) { maxDist = distDaSede; seedIdx = i; }
-             }
-        }
-
         while (activeCluster.length > 0) {
-          let bestIdx = seedIdx; 
-          
-          if (bestIdx === -1) {
-              let minDistanza = Infinity;
-              for (let i = 0; i < activeCluster.length; i++) {
-                const c = activeCluster[i];
-                const dist = calcolaDistanzaKm(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, c.lat, c.lng);
-                if (dist < minDistanza) { minDistanza = dist; bestIdx = i; }
-              }
+          let bestIdx = -1; 
+          let minDistanza = Infinity;
+          for (let i = 0; i < activeCluster.length; i++) {
+            const c = activeCluster[i];
+            const dist = calcolaDistanzaKm(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, c.lat, c.lng);
+            if (dist < minDistanza) { minDistanza = dist; bestIdx = i; }
           }
-          seedIdx = -1;
 
           if (bestIdx !== -1) {
             const candidato = activeCluster[bestIdx];
@@ -925,7 +895,6 @@ Tecnico: ${tecnicoNome}`;
               ultimaCoordGiorno = { lat: candidato.lat, lng: candidato.lng };
               activeCluster.splice(bestIdx, 1); 
               aggiuntoQualcuno = true;
-              isPrimoInterventoDelGiorno = false;
             } else { 
               break; 
             }
@@ -938,7 +907,7 @@ Tecnico: ${tecnicoNome}`;
 
     clusters.forEach(cluster => {
       cluster.forEach(c => {
-        clientiSospesiTmp.push({ ...c, motivoSospeso: "Tempo esaurito (Giornate Piene / Limite Distanza)" });
+        clientiSospesiTmp.push({ ...c, motivoSospeso: "Tempo esaurito (Giornate Piene)" });
       });
     });
     
