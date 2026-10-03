@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import dynamic from "next/dynamic";
-import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database, Car } from "lucide-react";
+import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database, Car, Home as HomeIcon } from "lucide-react";
 
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLayer), { ssr: false });
@@ -178,7 +178,7 @@ const calcolaTempoDistanzaGoogle = async (lat1: number, lon1: number, lat2: numb
         console.error("Errore Distance Matrix API JS SDK:", e);
     }
     
-    // Fallback di emergenza se fallisce Google Maps
+    // Fallback di emergenza
     const dist = calcolaDistanzaKm(lat1, lon1, lat2, lon2);
     return { minuti: Math.round(dist * 2), km: Number(dist.toFixed(1)) };
 };
@@ -757,13 +757,25 @@ Tecnico: ${tecnicoNome}`;
         let bestClusterIdx = -1;
         let minClusterDist = Infinity;
         
-        for (let i = 0; i < clusters.length; i++) {
-          if (clusters[i].length === 0) continue;
-          const distToCluster = Math.min(...clusters[i].map(c => calcolaDistanzaKm(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, c.lat, c.lng)));
-          if (distToCluster < minClusterDist) {
-            minClusterDist = distToCluster;
-            bestClusterIdx = i;
-          }
+        if (isPrimoInterventoDelGiorno && giornata.anchorLat === null) {
+            // Prendi la macchia più grande disponibile per iniziare la giornata
+            for (let i = 0; i < clusters.length; i++) {
+                if (clusters[i].length > 0) {
+                    bestClusterIdx = i;
+                    minClusterDist = Math.min(...clusters[i].map(c => calcolaDistanzaKm(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, c.lat, c.lng)));
+                    break;
+                }
+            }
+        } else {
+            // Cerca il cluster più vicino all'ultima posizione
+            for (let i = 0; i < clusters.length; i++) {
+              if (clusters[i].length === 0) continue;
+              const distToCluster = Math.min(...clusters[i].map(c => calcolaDistanzaKm(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, c.lat, c.lng)));
+              if (distToCluster < minClusterDist) {
+                minClusterDist = distToCluster;
+                bestClusterIdx = i;
+              }
+            }
         }
         
         if (bestClusterIdx === -1) break; 
