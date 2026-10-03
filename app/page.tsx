@@ -178,7 +178,6 @@ const calcolaTempoDistanzaGoogle = async (lat1: number, lon1: number, lat2: numb
         console.error("Errore Distance Matrix API JS SDK:", e);
     }
     
-    // Fallback di emergenza
     const dist = calcolaDistanzaKm(lat1, lon1, lat2, lon2);
     return { minuti: Math.round(dist * 2), km: Number(dist.toFixed(1)) };
 };
@@ -597,7 +596,8 @@ Tecnico: ${tecnicoNome}`;
           codice: idCliente, numeroBi, nome: riga.desclifor || "Sconosciuto",
           indirizzo: riga.indirizzo || riga.INDIRIZZO || "", localita: riga.localita || riga.LOCALITA || "",
           telefono: telDaUsare, email: emailDaUsare, contatto: contattoDaUsare,
-          haInsoluto: false, resoEstintori: false, totaleArticoli: 0, minutiLavoro: 20, dettaglioAttrezzature: [], selezionatoPerGiro: true, giorniDallUltimoSos: 8, syncedToGoogle: false, muletti_eorv: 0 
+          haInsoluto: false, resoEstintori: false, totaleArticoli: 0, minutiLavoro: 20, dettaglioAttrezzature: [], selezionatoPerGiro: true, giorniDallUltimoSos: 8, syncedToGoogle: false, muletti_eorv: 0,
+          _rawItems: [], _maxMt: { eo: 0, po: 0, id: 0, la: 0, ir: 0, ss: 0, ri: 0, gp: 0, rv: 0 }
         });
       }
 
@@ -607,22 +607,122 @@ Tecnico: ${tecnicoNome}`;
       if (numFattura !== "" && numFattura !== "-" && (parseFloat(riga.imptotft) || 0) > 0 && !(riga.codpagam || "").toUpperCase().trim().startsWith("RB")) cliente.haInsoluto = true;
       if ((riga.codclose ? String(riga.codclose).toUpperCase().trim() : "") === "SOS" || testoRiga.includes("SOS")) cliente.resoEstintori = true;
 
-      const eoRv = Number(riga.eo_rv || riga.EO_RV) || 0;
-      cliente.muletti_eorv += eoRv;
-
-      let minutiTotaliRiga = 0; let pezziTotaliRiga = 0; const dettaglio: any[] = [];
-      if (cliente.resoEstintori) {
-        if (eoRv > 0) { minutiTotaliRiga += eoRv*2; pezziTotaliRiga += eoRv; dettaglio.push({ descrizione: "Revisione Estintori (SOS)", quantita: eoRv, categoria: "Rev (2m)", minutiImpegno: eoRv*2 }); }
-      } else {
-        const items = [
-          { v: Number(riga.eo_mt)||0, m: 2, n: "Estintori (Manutenzione)" }, { v: Number(riga.id_mt)||0, m: 2, n: "Idranti" },
-          { v: Number(riga.po_mt)||0, m: 3, n: "Porte Tagliafuoco / REI" }, { v: Number(riga.ss_mt)||0, m: 2, n: "Uscite di Emergenza" },
-          { v: Number(riga.la_mt)||0, m: 1, n: "Lampade di Emergenza" }, { v: Number(riga.ir_mt)||0, m: 30, n: "Impianto Rilevazione (IRAI)" },
-          { v: Number(riga.ri_mt)||0, m: 15, n: "Rete Idrica" }, { v: Number(riga.gp_mt)||0, m: 20, n: "Gruppo Pressurizzazione" }
-        ];
-        items.forEach(it => { if(it.v > 0){ minutiTotaliRiga += it.v*it.m; pezziTotaliRiga += it.v; dettaglio.push({ descrizione: it.n, quantita: it.v, categoria: `(${it.m}m/pz)`, minutiImpegno: it.v*it.m }); } });
+      const qta = Number(riga.quantita) || 0;
+      const desc = String(riga.desdocrig || "");
+      if (qta > 0 && desc) {
+          cliente._rawItems.push({ desc, qta });
       }
-      if (minutiTotaliRiga > 0 || cliente.minutiLavoro === 20) { cliente.totaleArticoli = pezziTotaliRiga; cliente.minutiLavoro = 20 + minutiTotaliRiga; cliente.dettaglioAttrezzature = dettaglio; }
+      
+      cliente._maxMt.eo = Math.max(cliente._maxMt.eo, Number(riga.eo_mt) || 0);
+      cliente._maxMt.po = Math.max(cliente._maxMt.po, Number(riga.po_mt) || 0);
+      cliente._maxMt.id = Math.max(cliente._maxMt.id, Number(riga.id_mt) || 0);
+      cliente._maxMt.la = Math.max(cliente._maxMt.la, Number(riga.la_mt) || 0);
+      cliente._maxMt.ir = Math.max(cliente._maxMt.ir, Number(riga.ir_mt) || 0);
+      cliente._maxMt.ss = Math.max(cliente._maxMt.ss, Number(riga.ss_mt) || 0);
+      cliente._maxMt.ri = Math.max(cliente._maxMt.ri, Number(riga.ri_mt) || 0);
+      cliente._maxMt.gp = Math.max(cliente._maxMt.gp, Number(riga.gp_mt) || 0);
+      cliente._maxMt.rv = Math.max(cliente._maxMt.rv, Number(riga.eo_rv || riga.EO_RV) || 0);
+    }
+
+    // FASE DI CORRISPONDENZA: Controllo se i totali Excel sono validi o se devo sommare le righe
+    for (const cliente of Array.from(clientiMappa.values())) {
+        
+        if (cliente.resoEstintori) {
+            // REGOLA RIGIDA SOS: L'unico dato certo sui resi è la colonna eo_rv.
+            // Ignoriamo la quantità perché potremmo restituire solo 1 pezzo su 100 fatturati.
+            let veriMuletti = cliente._maxMt.rv || 0;
+            
+            cliente.muletti_eorv = veriMuletti;
+            
+            if (veriMuletti > 0) {
+                cliente.minutiLavoro = 20 + (veriMuletti * 2);
+                cliente.totaleArticoli = veriMuletti;
+                cliente.dettaglioAttrezzature = [{ descrizione: "Restituzione Estintori (SOS)", quantita: veriMuletti, categoria: "Rev (2m)", minutiImpegno: veriMuletti * 2 }];
+            } else {
+                cliente.minutiLavoro = 20;
+                cliente.totaleArticoli = 0;
+                cliente.dettaglioAttrezzature = [];
+            }
+        } else {
+            // MANUTENZIONE ORDINARIA: Applichiamo il paracadute di sicurezza se l'Excel esporta male
+            let sumQtaEstintori = 0;
+            let sumQtaPorte = 0;
+            let sumQtaIdranti = 0;
+            let sumQtaLampade = 0;
+            let sumQtaIrai = 0;
+            let sumQtaReti = 0;
+            let sumQtaGruppi = 0;
+            let sumQtaUscite = 0;
+
+            cliente._rawItems.forEach((item: any) => {
+                const d = item.desc.toLowerCase();
+                const q = item.qta;
+                if (d.includes("estintor") || d.includes("schiuma") || d.includes("co2") || d.includes("polvere") || d.includes("idrico")) sumQtaEstintori += q;
+                else if (d.includes("porta") || d.includes("rei") || d.includes("tagliafuoco")) sumQtaPorte += q;
+                else if (d.includes("naspo") || d.includes("idrant") || d.includes("manichett") || d.includes("manichet")) sumQtaIdranti += q;
+                else if (d.includes("lampad")) sumQtaLampade += q;
+                else if (d.includes("emergenza") || d.includes("antipanico")) sumQtaUscite += q;
+                else if (d.includes("rivelazion") || d.includes("rilevazion") || d.includes("fumi") || d.includes("irai")) sumQtaIrai += q;
+                else if (d.includes("rete idrica") || d.includes("mandata")) sumQtaReti += q;
+                else if (d.includes("gruppo") || d.includes("pressurizzazion") || d.includes("pompe")) sumQtaGruppi += q;
+            });
+
+            // Controllo di Corrispondenza: La colonna Excel è fallata se conta <=1 o 0, ma le righe dicono il contrario
+            const usaRighe = (
+                (sumQtaEstintori > 0 && cliente._maxMt.eo <= 1 && sumQtaEstintori > 1) || 
+                (sumQtaPorte > 0 && cliente._maxMt.po === 0) ||
+                (sumQtaIdranti > 0 && cliente._maxMt.id === 0) ||
+                (sumQtaLampade > 0 && cliente._maxMt.la === 0)
+            );
+
+            let minutiTotali = 0;
+            let pezziTotali = 0;
+            const dettaglio: any[] = [];
+
+            if (usaRighe) {
+                const itemsRighe = [
+                    { v: sumQtaEstintori, m: 2, n: "Estintori (Da Righe)" },
+                    { v: sumQtaIdranti, m: 2, n: "Idranti (Da Righe)" },
+                    { v: sumQtaPorte, m: 3, n: "Porte Tagliafuoco (Da Righe)" },
+                    { v: sumQtaUscite, m: 2, n: "Uscite Emergenza (Da Righe)" },
+                    { v: sumQtaLampade, m: 1, n: "Lampade Emergenza (Da Righe)" },
+                    { v: sumQtaIrai, m: 30, n: "Impianto Rilevazione (Da Righe)" },
+                    { v: sumQtaReti, m: 15, n: "Rete Idrica (Da Righe)" },
+                    { v: sumQtaGruppi, m: 20, n: "Gruppo Pressurizzazione (Da Righe)" }
+                ];
+                itemsRighe.forEach(it => { 
+                    if(it.v > 0) { 
+                        minutiTotali += it.v * it.m; pezziTotali += it.v; 
+                        dettaglio.push({ descrizione: it.n, quantita: it.v, categoria: `(${it.m}m/pz)`, minutiImpegno: it.v * it.m }); 
+                    } 
+                });
+            } else {
+                const itemsMt = [
+                    { v: cliente._maxMt.eo, m: 2, n: "Estintori (Manutenzione)" },
+                    { v: cliente._maxMt.id, m: 2, n: "Idranti" },
+                    { v: cliente._maxMt.po, m: 3, n: "Porte Tagliafuoco / REI" },
+                    { v: cliente._maxMt.ss, m: 2, n: "Uscite di Emergenza" },
+                    { v: cliente._maxMt.la, m: 1, n: "Lampade di Emergenza" },
+                    { v: cliente._maxMt.ir, m: 30, n: "Impianto Rilevazione (IRAI)" },
+                    { v: cliente._maxMt.ri, m: 15, n: "Rete Idrica" },
+                    { v: cliente._maxMt.gp, m: 20, n: "Gruppo Pressurizzazione" }
+                ];
+                itemsMt.forEach(it => { 
+                    if(it.v > 0) { 
+                        minutiTotali += it.v * it.m; pezziTotali += it.v; 
+                        dettaglio.push({ descrizione: it.n, quantita: it.v, categoria: `(${it.m}m/pz)`, minutiImpegno: it.v * it.m }); 
+                    } 
+                });
+            }
+            
+            cliente.muletti_eorv = cliente._maxMt.rv || 0;
+            
+            if (minutiTotali > 0) {
+                cliente.totaleArticoli = pezziTotali;
+                cliente.minutiLavoro = 20 + minutiTotali;
+                cliente.dettaglioAttrezzature = dettaglio;
+            }
+        }
     }
 
     const datiConCoordinate = [];
@@ -758,7 +858,6 @@ Tecnico: ${tecnicoNome}`;
         let minClusterDist = Infinity;
         
         if (isPrimoInterventoDelGiorno && giornata.anchorLat === null) {
-            // Prendi la macchia più grande disponibile per iniziare la giornata
             for (let i = 0; i < clusters.length; i++) {
                 if (clusters[i].length > 0) {
                     bestClusterIdx = i;
@@ -767,7 +866,6 @@ Tecnico: ${tecnicoNome}`;
                 }
             }
         } else {
-            // Cerca il cluster più vicino all'ultima posizione
             for (let i = 0; i < clusters.length; i++) {
               if (clusters[i].length === 0) continue;
               const distToCluster = Math.min(...clusters[i].map(c => calcolaDistanzaKm(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, c.lat, c.lng)));
@@ -1455,7 +1553,7 @@ Tecnico: ${tecnicoNome}`;
             <div className={`bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative ${inElaborazione ? 'opacity-50 pointer-events-none' : ''}`}>
               {inElaborazione && (
                  <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/40 backdrop-blur-[2px]">
-                    <div className="bg-blue-600 text-white px-5 py-3 rounded-xl font-bold flex items-center gap-3 shadow-xl"><Loader2 size={20} className="animate-spin" /> Elaborazione rotte su Google Maps in corso...</div>
+                    <div className="bg-blue-600 text-white px-5 py-3 rounded-xl font-bold flex items-center gap-3 shadow-xl"><Loader2 size={20} className="animate-spin" /> Elaborazione rotte in corso...</div>
                  </div>
               )}
               
