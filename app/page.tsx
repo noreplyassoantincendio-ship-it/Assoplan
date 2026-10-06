@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import dynamic from "next/dynamic";
-import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database, Car, Home as HomeIcon } from "lucide-react";
+import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database, Car, Home as HomeIcon, AlertOctagon } from "lucide-react";
 
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLayer), { ssr: false });
@@ -15,8 +15,7 @@ const Popup = dynamic(() => import("react-leaflet").then((mod) => mod.Popup), { 
 const GOOGLE_CLIENT_ID = "645365149295-lk8ei43kt09hsm2csupf643tgqkqqgmo.apps.googleusercontent.com";
 const GOOGLE_SCOPES = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.events";
 
-const FINE_GIORNATA_ASSOLUTA = 18 * 60; // 18:00 limite max assoluto
-const LIMITE_ULTIMO_INIZIO = 17 * 60; // 17:00 limite massimo per iniziare un nuovo intervento
+const FINE_GIORNATA_ASSOLUTA = 18 * 60; // 18:00
 const INIZIO_PAUSA = 12 * 60 + 30; // 12:30
 const FINE_PAUSA = 14 * 60; // 14:00
 const DURATA_PAUSA = 90;
@@ -34,13 +33,14 @@ const formattaDataVisuale = (dataStr: string) => {
 const getNextWeekDays = () => {
   const today = new Date();
   const dayOfWeek = today.getDay(); 
-  const daysUntilNextMonday = dayOfWeek === 0 ? 1 : 8 - dayOfWeek;
   
-  const nextMonday = new Date(today);
-  nextMonday.setDate(today.getDate() + daysUntilNextMonday);
+  const daysToMonday = dayOfWeek === 0 ? 1 : (dayOfWeek === 6 ? 2 : 1 - dayOfWeek);
   
-  const nextFriday = new Date(nextMonday);
-  nextFriday.setDate(nextMonday.getDate() + 4);
+  const startMonday = new Date(today);
+  startMonday.setDate(today.getDate() + daysToMonday);
+  
+  const endFriday = new Date(startMonday);
+  endFriday.setDate(startMonday.getDate() + 4);
 
   const fmt = (d: Date) => {
     const yyyy = d.getFullYear();
@@ -49,7 +49,46 @@ const getNextWeekDays = () => {
     return `${yyyy}-${mm}-${dd}`;
   };
   
-  return { start: fmt(nextMonday), end: fmt(nextFriday) };
+  return { start: fmt(startMonday), end: fmt(endFriday) };
+};
+
+const getNomeGiorno = (dataStr: string) => {
+  if (!dataStr || typeof dataStr !== 'string') return "Lunedì";
+  const parts = dataStr.split("-");
+  if (parts.length < 3) return "Lunedì";
+  const [y, m, d] = parts.map(Number);
+  const date = new Date(y, m - 1, d);
+  const mapGiorni = ["Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"];
+  return mapGiorni[date.getDay()] || "Lunedì";
+};
+
+const getGiornateLavorative = (inizio: string, fine: string, attivi: { [key: string]: boolean }) => {
+  const dates = [];
+  if (!inizio || !fine) return dates;
+  
+  const partsI = inizio.split("-");
+  const partsF = fine.split("-");
+  if(partsI.length < 3 || partsF.length < 3) return dates;
+
+  const [yI, mI, dI] = partsI.map(Number);
+  const [yF, mF, dF] = partsF.map(Number);
+  let curr = new Date(yI, mI - 1, dI);
+  const end = new Date(yF, mF - 1, dF);
+  const mapGiorni = ["Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"];
+  
+  let limit = 0;
+  while (curr <= end && limit < 365) {
+    const nomeGiorno = mapGiorni[curr.getDay()];
+    if (attivi[nomeGiorno]) {
+      const y = curr.getFullYear(); 
+      const m = String(curr.getMonth() + 1).padStart(2, '0'); 
+      const d = String(curr.getDate()).padStart(2, '0');
+      dates.push({ dataStr: `${y}-${m}-${d}`, nomeGiorno });
+    }
+    curr.setDate(curr.getDate() + 1);
+    limit++;
+  }
+  return dates;
 };
 
 const elaboraFileExcelGenerico = (file: File, callback: (righe: any[]) => void) => {
@@ -90,14 +129,14 @@ const elaboraFileExcelGenerico = (file: File, callback: (righe: any[]) => void) 
   }
 };
 
-const calcolaTempistiche = (orarioPartenza: number, minViaggio: number, minutiLavoro: number) => {
-    let inizioLavoro = Math.round(orarioPartenza + minViaggio);
+const calcolaTempistiche = (orarioPartenza: number | string, minViaggio: number | string, minutiLavoro: number | string) => {
+    let inizioLavoro = Math.round(Number(orarioPartenza) + Number(minViaggio));
     
     if (inizioLavoro >= INIZIO_PAUSA && inizioLavoro < FINE_PAUSA) {
         inizioLavoro = FINE_PAUSA;
     }
 
-    let fineLavoro = inizioLavoro + minutiLavoro;
+    let fineLavoro = inizioLavoro + Number(minutiLavoro);
 
     if (inizioLavoro < INIZIO_PAUSA && fineLavoro > INIZIO_PAUSA) {
         fineLavoro += DURATA_PAUSA;
@@ -195,6 +234,7 @@ export default function Home() {
   
   const [leafletLoaded, setLeafletLoaded] = useState(false);
   const leafletRef = useRef<any>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null); 
   
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [googleToken, setGoogleToken] = useState<string | null>(null);
@@ -226,6 +266,8 @@ export default function Home() {
     { sender: 'ai', text: 'Ciao! Sono il tuo assistente operativo. Carica il file Excel dei cantieri e dammi qualsiasi istruzione per pianificare o modificare la settimana.' }
   ]);
   const [chatLoading, setChatLoading] = useState(false);
+  
+  const [dragOverCard, setDragOverCard] = useState<string | null>(null);
 
   const tecniciAnagrafica = [
     { nome: "Fabrizio Vercellino", email: "tecnici08.assoantincendio@gmail.com" },
@@ -240,6 +282,20 @@ export default function Home() {
   ];
 
   const [tecnicoSelezionato, setTecnicoSelezionato] = useState(tecniciAnagrafica[0]);
+
+  useEffect(() => {
+    const range = getGiornateLavorative(dataInizio, dataFine, giorniAttivi);
+    const statsBase = range.map(g => ({
+      ...g,
+      minutiDisponibili: 480,
+      statoGiornata: "APERTO",
+      anchorLat: null,
+      anchorLng: null,
+      orarioPartenzaMinuti: 8 * 60,
+      orarioFineMinuti: 8 * 60
+    }));
+    setGiornateStats(statsBase);
+  }, [dataInizio, dataFine, giorniAttivi]);
 
   useEffect(() => {
     import("leaflet").then((L) => {
@@ -266,6 +322,10 @@ export default function Home() {
     const storedRubrica = localStorage.getItem("asso_rubrica_clienti");
     if (storedRubrica) { try { setRubricaClienti(JSON.parse(storedRubrica)); } catch (e) {} }
   }, []);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, chatLoading]);
 
   useEffect(() => {
     const initGoogleClient = () => {
@@ -315,8 +375,33 @@ export default function Home() {
       return { lat: 44.4568, lng: 8.7678, precisione: "strada", origine: "override_manuale" };
     }
 
-    const citta = localita && localita.trim().length > 0 ? localita.trim() : "Genova";
-    const query = `${cleanAddr}, ${citta}, Italy`;
+    let citta = localita && localita.trim().length > 0 ? localita.trim() : "";
+    if (cleanAddr.includes("-") && !citta) {
+       const parts = cleanAddr.split("-");
+       cleanAddr = parts[0].trim();
+       citta = parts[1].trim();
+    }
+
+    const comuniProvincia = ["ronco scrivia", "busalla", "mignanego", "crocefieschi", "arenzano", "mele", "voltri", "sanremo", "imperia", "vado ligure", "savona", "pontedecimo", "bolzaneto", "campomorone", "ceranesi", "sant'olcese", "serra riccò"];
+    const addrLower = cleanAddr.toLowerCase();
+    
+    if (!citta || citta.toLowerCase() === "genova") {
+       for (const comune of comuniProvincia) {
+          if (addrLower.includes(comune)) {
+              citta = comune;
+              break;
+          }
+       }
+    }
+
+    if (!citta) citta = "Genova";
+    
+    let query = "";
+    if (cleanAddr.toLowerCase().includes("italia") || cleanAddr.toLowerCase().includes("italy")) {
+        query = cleanAddr; 
+    } else {
+        query = `${cleanAddr}, ${citta}, Italy`;
+    }
 
     const cacheChiave = query.toLowerCase();
     const cacheSalvata = localStorage.getItem("asso_mappe_cache");
@@ -337,31 +422,6 @@ export default function Home() {
       }
     } catch (error) {}
     return null;
-  };
-
-  const getNomeGiorno = (dataStr: string) => {
-    const [y, m, d] = dataStr.split("-").map(Number);
-    const date = new Date(y, m - 1, d);
-    const mapGiorni = ["Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"];
-    return mapGiorni[date.getDay()];
-  };
-
-  const getGiornateLavorative = (inizio: string, fine: string, attivi: { [key: string]: boolean }) => {
-    const dates = [];
-    const [yI, mI, dI] = inizio.split("-").map(Number);
-    const [yF, mF, dF] = fine.split("-").map(Number);
-    let curr = new Date(yI, mI - 1, dI);
-    const end = new Date(yF, mF - 1, dF);
-    const mapGiorni = ["Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"];
-    while (curr <= end) {
-      const nomeGiorno = mapGiorni[curr.getDay()];
-      if (attivi[nomeGiorno]) {
-        const y = curr.getFullYear(); const m = String(curr.getMonth() + 1).padStart(2, '0'); const d = String(curr.getDate()).padStart(2, '0');
-        dates.push({ dataStr: `${y}-${m}-${d}`, nomeGiorno });
-      }
-      curr.setDate(curr.getDate() + 1);
-    }
-    return dates;
   };
 
   const fetchEventiRealiCalendar = async (emailTecnico: string, token: string) => {
@@ -387,9 +447,18 @@ export default function Home() {
         const matches = testoCompleto.match(/(?:BI[:\s]*)([A-Z0-9\/\-]+)/g);
         const biGiaLetti = matches ? matches.map(m => m.replace(/BI[:\s]*/g, "").trim()) : [];
         
+        let localitaEsattaDaNote = "";
+        if (evt.description) {
+            const matchLoc = evt.description.match(/Localit[aà]:\s*([^\n]+)/i);
+            if (matchLoc && matchLoc[1]) localitaEsattaDaNote = matchLoc[1].split("-")[0].trim();
+        }
+
         let latEvt: number | null = null; let lngEvt: number | null = null;
         if (evt.location && evt.location.trim().length > 2) {
-          const coord = await trovaCoordinateGoogle(evt.location, "Genova");
+          let addressToSearch = evt.location;
+          if (localitaEsattaDaNote) addressToSearch += `, ${localitaEsattaDaNote}`;
+          
+          const coord = await trovaCoordinateGoogle(addressToSearch, localitaEsattaDaNote); 
           if (coord) { latEvt = coord.lat; lngEvt = coord.lng; }
         }
 
@@ -438,7 +507,7 @@ export default function Home() {
     return `${tagString}${cliente.nome} - BI ${cliente.numeroBi}`;
   };
 
-  const generaDescrizioneEvento = (cliente: any, tecnicoNome: string, interventiGiorno: any[] = []) => {
+  const generaDescrizioneEvento = (cliente: any, tecnicoNome: string, tecnicoEmail: string, interventiGiorno: any[] = []) => {
     if (cliente.isDistinta) {
         const tappe = interventiGiorno.filter(i => !i.isDistinta && i.selezionatoPerGiro);
         let navUrl = "";
@@ -476,11 +545,13 @@ https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${clien
 Tecnico: ${tecnicoNome}`;
   };
 
-  const ricalcolaDistinteEOrari = async (listaDaOrdinare: any[], statsLocali: any[] = giornateStats) => {
-      const listaPulita = listaDaOrdinare.filter(i => !i.isDistinta);
+  const ricalcolaDistinteEOrari = async (listaDaOrdinare: any[], statsLocali: any[] = giornateStats, usaOrdinamentoGeografico = true) => {
+      const listaPulita = listaDaOrdinare.filter(i => !i.isDistinta && i.dataAssegnata && typeof i.dataAssegnata === 'string');
       const mapGiorni = new Map();
       const vecchieDistinte = listaDaOrdinare.filter(i => i.isDistinta);
       const nuoveStats = statsLocali.map(g => ({ ...g }));
+      
+      const scartatiTemporanei: any[] = []; 
 
       listaPulita.forEach(i => {
         if (!mapGiorni.has(i.dataAssegnata)) mapGiorni.set(i.dataAssegnata, []);
@@ -491,78 +562,107 @@ Tecnico: ${tecnicoNome}`;
 
       for (const [dataStr, interventiGiorno] of Array.from(mapGiorni.entries())) {
         const stat = statsLocali.find(g => g.dataStr === dataStr);
-        
-        // CORRETTO: Calcoliamo sempre l'orario di partenza corretto dal mattino (pregressi o 08:00) 
-        // evitando che un precedente ricalcolo faccia partire la giornata alle 17:00/18:00
-        let orarioCorrenteMinuti = 8 * 60;
+        let orarioCorrenteMinuti = 8 * 60; 
         let ultimaCoordGiorno: { lat: number; lng: number } | null = null;
+        let listaFinaleGiorno: any[] = [];
         
-        const pregressiGiorno = interventiGiorno.filter((c: any) => c.isPregresso);
-        if (pregressiGiorno.length > 0) {
-            let maxPregressoEnd = 8 * 60;
-            pregressiGiorno.forEach((p: any) => {
-                const [h, m] = p.oraFine.split(":").map(Number);
-                const fine = h * 60 + m;
-                if (fine > maxPregressoEnd) maxPregressoEnd = fine;
-                if (p.lat && p.lng && !ultimaCoordGiorno) {
-                    ultimaCoordGiorno = { lat: p.lat, lng: p.lng };
+        if (usaOrdinamentoGeografico) {
+            let daOrdinare = interventiGiorno.filter(i => !i.isPregresso && i.selezionatoPerGiro);
+            const pregressiGiorno = interventiGiorno.filter(c => c.isPregresso);
+            
+            if (pregressiGiorno.length > 0) {
+                let maxPregressoEnd = 8 * 60;
+                pregressiGiorno.forEach(p => {
+                    const oraFineStr = p.oraFine || "18:00";
+                    const [h, m] = String(oraFineStr).split(":").map(Number);
+                    const fine = (Number(h) * 60) + Number(m);
+                    if (fine > maxPregressoEnd) maxPregressoEnd = fine;
+                    if (p.lat && p.lng && !ultimaCoordGiorno) {
+                        ultimaCoordGiorno = { lat: p.lat, lng: p.lng };
+                    }
+                });
+                orarioCorrenteMinuti = Math.max(Number(orarioCorrenteMinuti), Number(maxPregressoEnd) + 30);
+                if (orarioCorrenteMinuti >= INIZIO_PAUSA && orarioCorrenteMinuti < FINE_PAUSA) {
+                    orarioCorrenteMinuti = FINE_PAUSA;
                 }
-            });
-            orarioCorrenteMinuti = Math.min(maxPregressoEnd + 30, FINE_GIORNATA_ASSOLUTA);
-            if (orarioCorrenteMinuti >= INIZIO_PAUSA && orarioCorrenteMinuti < FINE_PAUSA) {
-                orarioCorrenteMinuti = FINE_PAUSA;
+            } else if (stat && stat.anchorLat) {
+                ultimaCoordGiorno = { lat: stat.anchorLat, lng: stat.anchorLng };
             }
-        } else if (stat && stat.anchorLat) {
-            ultimaCoordGiorno = { lat: stat.anchorLat, lng: stat.anchorLng };
+
+            let ordinatiGoogle = [];
+            let currPos = ultimaCoordGiorno || { lat: SEDE_UFFICIO_LAT, lng: SEDE_UFFICIO_LNG };
+            
+            while (daOrdinare.length > 0) {
+                daOrdinare.sort((a,b) => calcolaDistanzaKm(currPos.lat, currPos.lng, a.lat, a.lng) - calcolaDistanzaKm(currPos.lat, currPos.lng, b.lat, b.lng));
+                const next = daOrdinare.shift();
+                ordinatiGoogle.push(next);
+                if (next.lat && next.lng) currPos = { lat: next.lat, lng: next.lng };
+            }
+
+            listaFinaleGiorno = [...pregressiGiorno, ...ordinatiGoogle];
+        } else {
+            listaFinaleGiorno = [...interventiGiorno];
+            if (stat && stat.anchorLat && (!listaFinaleGiorno[0] || !listaFinaleGiorno[0].isPregresso)) {
+                ultimaCoordGiorno = { lat: stat.anchorLat, lng: stat.anchorLng };
+            }
         }
 
         let furgone = 0; let piccoNegativo = 0; let totaleMovimenti = 0;
         let prevCliente: any = null;
+        ultimaCoordGiorno = null;
+        
+        let clientiAmmessi = [];
 
-        for (const c of interventiGiorno) {
+        for (const c of listaFinaleGiorno) {
             if (c.isPregresso) {
-                const [hEnd, mEnd] = c.oraFine.split(":").map(Number);
-                orarioCorrenteMinuti = Math.min(Math.max(orarioCorrenteMinuti, (hEnd * 60 + mEnd) + 30), FINE_GIORNATA_ASSOLUTA);
+                const oraFineStr = c.oraFine || "18:00";
+                const [hEnd, mEnd] = String(oraFineStr).split(":").map(Number);
+                
+                const finePregressoMinuti = (Number(hEnd) * 60 + Number(mEnd));
+                orarioCorrenteMinuti = Math.max(Number(orarioCorrenteMinuti), finePregressoMinuti + 30);
                 
                 if (prevCliente && ultimaCoordGiorno && c.lat && c.lng) {
                     const { minuti } = await calcolaTempoDistanzaGoogle(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, c.lat, c.lng);
-                    prevCliente.minutiVersoProssimo = minuti;
+                    prevCliente.minutiVersoProssimo = Number(minuti);
                     prevCliente.isRientroSede = false;
                 }
                 
                 c.minutiDaPrecedente = 0;
                 c.isPartenzaDaSede = !prevCliente;
-                
                 if (c.lat && c.lng) ultimaCoordGiorno = { lat: c.lat, lng: c.lng };
                 prevCliente = c;
-            } else if (!c.selezionatoPerGiro) {
-                c.oraInizio = "-";
-                c.oraFine = "-";
+                clientiAmmessi.push(c);
             } else {
                 const puntoPartenza = ultimaCoordGiorno || { lat: SEDE_UFFICIO_LAT, lng: SEDE_UFFICIO_LNG };
                 const { minuti: minViaggio } = await calcolaTempoDistanzaGoogle(puntoPartenza.lat, puntoPartenza.lng, c.lat, c.lng);
 
-                c.minutiDaPrecedente = minViaggio;
+                const { inizioLavoro, fineLavoro } = calcolaTempistiche(orarioCorrenteMinuti, minViaggio, c.minutiLavoro);
+                
+                if (Number(fineLavoro) > 1080) {
+                   c.selezionatoPerGiro = false;
+                   c.dataAssegnata = null;
+                   c.motivoSospeso = "Scartato per Limite Orario (Overtime)";
+                   scartatiTemporanei.push(c);
+                   continue; 
+                }
+
+                c.minutiDaPrecedente = Number(minViaggio);
                 c.isPartenzaDaSede = !prevCliente;
 
                 if (prevCliente) {
-                    prevCliente.minutiVersoProssimo = minViaggio;
+                    prevCliente.minutiVersoProssimo = Number(minViaggio);
                     prevCliente.isRientroSede = false;
                 }
 
-                const { inizioLavoro, fineLavoro } = calcolaTempistiche(orarioCorrenteMinuti, minViaggio, c.minutiLavoro);
-                const fineEffettiva = Math.min(fineLavoro, FINE_GIORNATA_ASSOLUTA);
-                const inizioEffettivo = Math.min(inizioLavoro, FINE_GIORNATA_ASSOLUTA);
-
-                const hhStart = String(Math.floor(inizioEffettivo / 60)).padStart(2, '0');
-                const mmStart = String(inizioEffettivo % 60).padStart(2, '0');
-                const hhEnd = String(Math.floor(fineEffettiva / 60)).padStart(2, '0');
-                const mmEnd = String(fineEffettiva % 60).padStart(2, '0');
+                const hhStart = String(Math.floor(inizioLavoro / 60)).padStart(2, '0');
+                const mmStart = String(inizioLavoro % 60).padStart(2, '0');
+                const hhEnd = String(Math.floor(fineLavoro / 60)).padStart(2, '0');
+                const mmEnd = String(fineLavoro % 60).padStart(2, '0');
 
                 c.oraInizio = `${hhStart}:${mmStart}`;
                 c.oraFine = `${hhEnd}:${mmEnd}`;
 
-                orarioCorrenteMinuti = fineEffettiva;
+                orarioCorrenteMinuti = fineLavoro;
                 ultimaCoordGiorno = { lat: c.lat, lng: c.lng };
                 prevCliente = c;
 
@@ -570,43 +670,47 @@ Tecnico: ${tecnicoNome}`;
                 furgone += delta;
                 totaleMovimenti += c.muletti_eorv;
                 if (furgone < piccoNegativo) piccoNegativo = furgone;
+                
+                clientiAmmessi.push(c);
             }
         }
         
         if (prevCliente && ultimaCoordGiorno) {
             const { minuti } = await calcolaTempoDistanzaGoogle(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG);
-            prevCliente.minutiVersoProssimo = minuti;
+            prevCliente.minutiVersoProssimo = Number(minuti);
             prevCliente.isRientroSede = true;
         }
 
         const targetStat = nuoveStats.find(s => s.dataStr === dataStr);
         if (targetStat) {
-            targetStat.orarioFineMinuti = Math.min(orarioCorrenteMinuti, FINE_GIORNATA_ASSOLUTA);
-            targetStat.statoGiornata = (FINE_GIORNATA_ASSOLUTA - orarioCorrenteMinuti) < 60 ? "PIENO (Sospeso)" : "APERTO";
+            targetStat.orarioFineMinuti = orarioCorrenteMinuti;
+            targetStat.statoGiornata = (FINE_GIORNATA_ASSOLUTA - orarioCorrenteMinuti) < 60 ? "PIENO" : "APERTO";
         }
 
         const fabbisognoNetto = Math.abs(piccoNegativo);
         const scortaJolly = Math.max(2, Math.ceil(fabbisognoNetto * 0.20));
         const totaleDaCaricare = fabbisognoNetto + scortaJolly;
 
-        let descStr = `🛠 DISTINTA MULETTI (Calcolo a Cascata):\n\n`;
-        descStr += `• Fabbisogno Netto (Scoperto Max Tappe): ${fabbisognoNetto} pz\n`;
-        descStr += `• Scorta Jolly Sicurezza (20% Fabbisogno, min 2): ${scortaJolly} pz\n`;
-        descStr += `-----------------------------------\n`;
-        descStr += `TOTALE MULETTI DA CARICARE: ${totaleDaCaricare} pz\n`;
-        descStr += `-----------------------------------\n`;
-        descStr += `(Movimentazione totale prevista: ${totaleMovimenti} pz)`;
+        let descStr = `🛠 DISTINTA MULETTI:\n\n• Fabbisogno Netto: ${fabbisognoNetto} pz\n• Scorta Jolly (20%): ${scortaJolly} pz\n-----------------------------------\nTOTALE MULETTI DA CARICARE: ${totaleDaCaricare} pz\n-----------------------------------\n(Movimentazione totale: ${totaleMovimenti} pz)`;
 
-        const primaRiga = interventiGiorno[0] || { giorno: getNomeGiorno(dataStr) };
+        const primaRiga = clientiAmmessi[0] || { giorno: getNomeGiorno(dataStr) };
         const oldDistinta = vecchieDistinte.find(d => d.dataAssegnata === dataStr);
 
         const distintaObj = {
             codice: `DISTINTA_${dataStr}`, isDistinta: true, nome: `📦 DISTINTA DI CARICO (${formattaDataVisuale(dataStr)})`, numeroBi: "MAGAZZINO", indirizzo: "Sede Asso Antincendio", localita: "Genova", minutiLavoro: 60, giorno: primaRiga.giorno, dataAssegnata: dataStr, oraInizio: "07:00", oraFine: "08:00", descrizioneDistinta: descStr, selezionatoPerGiro: true, syncedToGoogle: oldDistinta ? oldDistinta.syncedToGoogle : false, lat: SEDE_UFFICIO_LAT, lng: SEDE_UFFICIO_LNG
         };
 
-        distintaObj.descrizioneDistinta = generaDescrizioneEvento(distintaObj, tecnicoSelezionato.nome, interventiGiorno);
+        distintaObj.descrizioneDistinta = generaDescrizioneEvento(distintaObj, tecnicoSelezionato.nome, tecnicoSelezionato.email, clientiAmmessi);
 
-        nuovaLista.push(distintaObj, ...interventiGiorno);
+        nuovaLista.push(distintaObj, ...clientiAmmessi);
+      }
+
+      if (scartatiTemporanei.length > 0) {
+          setClientiInSospeso(prev => {
+              const prevCodes = new Set(prev.map(p => p.codice));
+              const nuoviScarti = scartatiTemporanei.filter(s => !prevCodes.has(s.codice));
+              return [...prev, ...nuoviScarti];
+          });
       }
 
       return { listaOrdinata: nuovaLista, statsAggiornate: nuoveStats };
@@ -641,7 +745,7 @@ Tecnico: ${tecnicoNome}`;
           codice: idCliente, numeroBi, nome: riga.desclifor || "Sconosciuto",
           indirizzo: riga.indirizzo || riga.INDIRIZZO || "", localita: riga.localita || riga.LOCALITA || "",
           telefono: telDaUsare, email: emailDaUsare, contatto: contattoDaUsare,
-          haInsoluto: false, resoEstintori: false, totaleArticoli: 0, minutiLavoro: 10, dettaglioAttrezzature: [], selezionatoPerGiro: true, giorniDallUltimoSos: 8, syncedToGoogle: false, muletti_eorv: 0,
+          haInsoluto: false, resoEstintori: false, totaleArticoli: 0, minutiLavoro: 10, dettaglioAttrezzature: [], selezionatoPerGiro: false, giorniDallUltimoSos: 8, syncedToGoogle: false, muletti_eorv: 0,
           _rawItems: [], _maxMt: { eo: 0, po: 0, id: 0, la: 0, ir: 0, ss: 0, ri: 0, gp: 0, rv: 0 }
         });
       }
@@ -832,8 +936,9 @@ Tecnico: ${tecnicoNome}`;
       let anchorLat: number | null = null; let anchorLng: number | null = null;
 
       pregressiDelGiorno.forEach(imp => {
-        const [h, m] = imp.oraFine.split(":").map(Number);
-        const fine = h * 60 + m;
+        const oraFineStr = imp.oraFine || "18:00";
+        const [h, m] = String(oraFineStr).split(":").map(Number);
+        const fine = (Number(h) * 60) + Number(m);
         if (fine > maxFineMinuti) maxFineMinuti = fine;
         if (imp.lat && imp.lng && !anchorLat) { anchorLat = imp.lat; anchorLng = imp.lng; }
       });
@@ -855,88 +960,71 @@ Tecnico: ${tecnicoNome}`;
     let unassigned = [...clientiDaPianificare];
     const clientiPianificati = [];
 
-    for (const giornata of giornateStrutturate) {
-      if (giornata.minutiDisponibili <= 0) continue; 
-      
-      let ultimaCoordGiorno = giornata.anchorLat !== null && giornata.anchorLng !== null 
-        ? { lat: giornata.anchorLat, lng: giornata.anchorLng } 
-        : { lat: SEDE_UFFICIO_LAT, lng: SEDE_UFFICIO_LNG };
+    try {
+        const payload = {
+            interventi: unassigned.map(c => ({
+                codice: c.codice,
+                nome: c.nome,
+                indirizzo: c.indirizzo,
+                localita: c.localita,
+                minutiLavoro: c.minutiLavoro
+            })),
+            giornate: giornateStrutturate.map(g => ({
+                dataStr: g.dataStr,
+                nomeGiorno: g.nomeGiorno,
+                pregressi: eventiPregressiUI.filter(p => p.dataAssegnata === g.dataStr).map(p => ({
+                    nome: p.nome,
+                    indirizzo: p.indirizzo,
+                    descrizione: p.descrizionePregressa
+                }))
+            }))
+        };
+
+        const res = await fetch('/api/planner', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                action: 'pianifica_settimana', 
+                data: payload,
+                history: messages.map(m => ({
+                    role: m.sender === 'user' ? 'user' : 'model',
+                    text: m.text
+                }))
+            })
+        });
         
-      let orarioAttualeSimulato = giornata.orarioPartenzaMinuti; 
-      let isFirstStopOfDay = true; 
-      
-      while (unassigned.length > 0 && orarioAttualeSimulato < LIMITE_ULTIMO_INIZIO) {
-        if (isFirstStopOfDay) {
-            if (giornata.anchorLat !== null && giornata.anchorLng !== null) {
-                unassigned.sort((a, b) => {
-                    return calcolaDistanzaKm(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, a.lat, a.lng) - 
-                           calcolaDistanzaKm(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, b.lat, b.lng);
-                });
-            } else {
-                unassigned.sort((a, b) => {
-                    return calcolaDistanzaKm(SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG, b.lat, b.lng) - 
-                           calcolaDistanzaKm(SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG, a.lat, a.lng);
-                });
-            }
-        } else {
-            unassigned.sort((a, b) => {
-                const distA = calcolaDistanzaKm(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, a.lat, a.lng);
-                const distB = calcolaDistanzaKm(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, b.lat, b.lng);
-                return distA - distB;
+        const iaResult = await res.json();
+        
+        if (iaResult.success && iaResult.piano) {
+            unassigned.forEach(c => {
+                let assigned = false;
+                for (const [dataStr, codici] of Object.entries(iaResult.piano.giorni)) {
+                    if ((codici as string[]).includes(c.codice)) {
+                        c.dataAssegnata = dataStr;
+                        c.giorno = getNomeGiorno(dataStr);
+                        c.selezionatoPerGiro = true;
+                        clientiPianificati.push(c);
+                        assigned = true;
+                        break;
+                    }
+                }
+                if (!assigned) {
+                    clientiSospesiTmp.push({ ...c, motivoSospeso: "Scartato dall'IA (Logistica / Tempo)", selezionatoPerGiro: false, dataAssegnata: null });
+                }
             });
+        } else {
+            throw new Error(iaResult.error || "L'Agente IA non ha restituito un piano valido");
         }
-
-        let aggiuntoQualcuno = false;
-
-        for (let i = 0; i < unassigned.length; i++) {
-            const candidato = unassigned[i];
-            
-            if (orarioAttualeSimulato >= 16 * 60 + 30) {
-               const distSedeUltima = calcolaDistanzaKm(SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG, ultimaCoordGiorno.lat, ultimaCoordGiorno.lng);
-               const distSedeCandidato = calcolaDistanzaKm(SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG, candidato.lat, candidato.lng);
-               if (distSedeUltima > 15 && distSedeCandidato < 8) {
-                   continue; 
-               }
-               const distUltimaTappa = calcolaDistanzaKm(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, candidato.lat, candidato.lng);
-               if (distUltimaTappa > 12) continue;
-            }
-
-            const { minuti: minViaggio } = await calcolaTempoDistanzaGoogle(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, candidato.lat, candidato.lng);
-            const { minuti: minRientro } = await calcolaTempoDistanzaGoogle(candidato.lat, candidato.lng, SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG);
-            
-            const { inizioLavoro, fineLavoro } = calcolaTempistiche(orarioAttualeSimulato, minViaggio, candidato.minutiLavoro);
-
-            if (inizioLavoro <= LIMITE_ULTIMO_INIZIO && (fineLavoro + minRientro) <= FINE_GIORNATA_ASSOLUTA) {
-              clientiPianificati.push({ 
-                  ...candidato, 
-                  settimana: `${formattaDataVisuale(dataInizio)} al ${formattaDataVisuale(dataFine)}`, 
-                  giorno: giornata.nomeGiorno, 
-                  dataAssegnata: giornata.dataStr 
-              });
-              orarioAttualeSimulato = fineLavoro;
-              ultimaCoordGiorno = { lat: candidato.lat, lng: candidato.lng };
-              
-              unassigned.splice(i, 1);
-              aggiuntoQualcuno = true;
-              isFirstStopOfDay = false;
-              break;
-            }
+    } catch (e: any) {
+        console.error("Dettaglio errore IA:", e);
+        if (typeof window !== 'undefined') {
+            window.alert(`Errore IA: ${e.message || "Errore sconosciuto"}. I cantieri sono stati inseriti nei Sospesi.`);
         }
-
-        if (!aggiuntoQualcuno) {
-            if (isFirstStopOfDay) {
-                isFirstStopOfDay = false;
-                continue;
-            }
-            break; 
-        }
-      }
+        unassigned.forEach(c => {
+            clientiSospesiTmp.push({ ...c, motivoSospeso: `Errore: ${e.message || "Sconosciuto"}`, selezionatoPerGiro: false, dataAssegnata: null });
+        });
     }
 
-    unassigned.forEach(c => {
-      clientiSospesiTmp.push({ ...c, motivoSospeso: "Tempo esaurito (Giornata piena o vincolo fine giornata)" });
-    });
-    
     const datiCombinati = [...eventiPregressiUI, ...clientiPianificati].sort((a, b) => {
         if (a.dataAssegnata !== b.dataAssegnata) return a.dataAssegnata.localeCompare(b.dataAssegnata);
         if (a.isPregresso && !b.isPregresso) return -1;
@@ -945,43 +1033,92 @@ Tecnico: ${tecnicoNome}`;
         return 0;
     });
 
-    const res = await ricalcolaDistinteEOrari(datiCombinati, giornateStats);
-    setInterventiGrezzi(res.listaOrdinata);
-    setGiornateStats(res.statsAggiornate);
-    setClientiInSospeso(clientiSospesiTmp);
+    const resRic = await ricalcolaDistinteEOrari(datiCombinati, giornateStrutturate, true);
+    setInterventiGrezzi(resRic.listaOrdinata);
+    setGiornateStats(resRic.statsAggiornate);
+    setClientiInSospeso(clientiSospesiTmp); 
     setClientiGiaCalendarizzati(clientiScartatiTmp);
     setInElaborazione(false);
   };
 
-  const toggleSelezioneCliente = async (codice: string) => { 
-    setInElaborazione(true);
-    try {
-        const nuovi = [...interventiGrezzi]; 
-        const idx = nuovi.findIndex(i => i.codice === codice);
-        if(idx !== -1) {
-          nuovi[idx].selezionatoPerGiro = !nuovi[idx].selezionatoPerGiro; 
-          const resRic = await ricalcolaDistinteEOrari(nuovi, giornateStats);
-          setInterventiGrezzi(resRic.listaOrdinata);
-          setGiornateStats(resRic.statsAggiornate);
-        }
-    } finally {
-        setInElaborazione(false);
-    }
+  const handleDragStartKanban = (e: React.DragEvent, codice: string) => {
+      e.dataTransfer.setData("application/kanban-card", codice);
   };
 
-  const rimuoviDaGiornata = async (codice: string) => {
-    setInElaborazione(true);
-    try {
-        const itemToRemove = interventiGrezzi.find(i => i.codice === codice);
-        if (!itemToRemove) return;
-        const nuoviGrezzi = interventiGrezzi.filter(i => i.codice !== codice);
-        setClientiInSospeso(prev => [...prev, { ...itemToRemove, motivoSospeso: "Rimosso manualmente", selezionatoPerGiro: true }]);
-        const resRic = await ricalcolaDistinteEOrari(nuoviGrezzi, giornateStats);
-        setInterventiGrezzi(resRic.listaOrdinata);
-        setGiornateStats(resRic.statsAggiornate);
-    } finally {
-        setInElaborazione(false);
-    }
+  const handleDragOverKanban = (e: React.DragEvent) => { 
+      e.preventDefault(); 
+  };
+
+  const handleDropToDay = async (e: React.DragEvent, targetDataAssegnata: string, targetCodice?: string) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOverCard(null);
+
+      const draggedCodice = e.dataTransfer.getData("application/kanban-card");
+      if (!draggedCodice || draggedCodice === targetCodice) return;
+
+      setInElaborazione(true);
+      try {
+          let result = Array.from(interventiGrezzi);
+          let item = result.find(i => i.codice === draggedCodice);
+          let isFromSospesi = false;
+
+          if (!item) {
+              const sospesoItem = clientiInSospeso.find(i => i.codice === draggedCodice);
+              if (sospesoItem) {
+                  item = { ...sospesoItem, selezionatoPerGiro: true, dataAssegnata: targetDataAssegnata };
+                  isFromSospesi = true;
+              }
+          }
+
+          if (!item) return;
+
+          if (isFromSospesi) {
+              setClientiInSospeso(prev => prev.filter(c => c.codice !== draggedCodice));
+          } else {
+              result = result.filter(i => i.codice !== draggedCodice);
+          }
+
+          item.dataAssegnata = targetDataAssegnata;
+
+          if (targetCodice) {
+              const targetIndex = result.findIndex(i => i.codice === targetCodice && i.dataAssegnata === targetDataAssegnata);
+              if (targetIndex !== -1) {
+                  result.splice(targetIndex, 0, item);
+              } else {
+                  result.push(item);
+              }
+          } else {
+              result.push(item);
+          }
+
+          const resRic = await ricalcolaDistinteEOrari(result, giornateStats, false);
+          setGiornateStats(resRic.statsAggiornate);
+          setInterventiGrezzi(resRic.listaOrdinata);
+      } finally {
+          setInElaborazione(false);
+      }
+  };
+
+  const handleDropToSospesi = async (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragOverCard(null);
+      const draggedCodice = e.dataTransfer.getData("application/kanban-card");
+      if (!draggedCodice) return;
+
+      setInElaborazione(true);
+      try {
+          const itemToRemove = interventiGrezzi.find(i => i.codice === draggedCodice);
+          if (itemToRemove && !itemToRemove.isDistinta && !itemToRemove.isPregresso) {
+              const nuoviGrezzi = interventiGrezzi.filter(i => i.codice !== draggedCodice);
+              setClientiInSospeso(prev => [...prev, { ...itemToRemove, motivoSospeso: "Spostato in Sospesi", selezionatoPerGiro: false, dataAssegnata: null }]);
+              const resRic = await ricalcolaDistinteEOrari(nuoviGrezzi, giornateStats, false);
+              setGiornateStats(resRic.statsAggiornate);
+              setInterventiGrezzi(resRic.listaOrdinata);
+          }
+      } finally {
+          setInElaborazione(false);
+      }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1016,7 +1153,8 @@ Tecnico: ${tecnicoNome}`;
     if (!chatInput.trim() || chatLoading) return;
 
     const userMessage = chatInput;
-    setMessages(prev => [...prev, { sender: 'user', text: userMessage }]);
+    const updatedMessages = [...messages, { sender: 'user', text: userMessage }];
+    setMessages(updatedMessages);
     setChatInput('');
     setChatLoading(true);
 
@@ -1027,17 +1165,76 @@ Tecnico: ${tecnicoNome}`;
         body: JSON.stringify({
           action: 'modifica_chat',
           comandoUtente: userMessage,
-          statoAttuale: interventiGrezzi
+          statoAttuale: {
+            interventi: interventiGrezzi.filter(i => !i.isDistinta).map(i => ({ codice: i.codice, nome: i.nome, dataAssegnata: i.dataAssegnata })),
+            sospesi: clientiInSospeso.map(s => ({ codice: s.codice, nome: s.nome }))
+          },
+          history: updatedMessages.map(m => ({
+            role: m.sender === 'user' ? 'user' : 'model',
+            text: m.text
+          }))
         })
       });
 
       const data = await res.json();
-      if (data.success && data.piano) {
-        setMessages(prev => [...prev, { sender: 'ai', text: 'Fatto! Ho aggiornato la pianificazione secondo le tue indicazioni.' }]);
-        let listaAggiornata = data.piano.interventi || interventiGrezzi;
-        const resRic = await ricalcolaDistinteEOrari(listaAggiornata, giornateStats);
-        setInterventiGrezzi(resRic.listaOrdinata);
-        setGiornateStats(resRic.statsAggiornate);
+      if (data.success) {
+        const rispostaDiscorsiva = data.messaggioChat || "Ho aggiornato la pianificazione secondo le tue indicazioni.";
+        setMessages(prev => [...prev, { sender: 'ai', text: rispostaDiscorsiva }]);
+        
+        if (data.piano && data.piano.giorni) {
+          try {
+            let tuttaLaLista = [...interventiGrezzi.filter(i => !i.isDistinta), ...clientiInSospeso];
+            let nuoviAssegnati: any[] = [];
+            let nuoviSospesi: any[] = [];
+
+            tuttaLaLista.forEach(item => {
+              item._aiIndex = 9999; 
+              let assegnato = false;
+              
+              for (const [dataStr, codici] of Object.entries(data.piano.giorni)) {
+                const codiciArray = codici as string[];
+                const indiceIA = codiciArray.indexOf(item.codice);
+                
+                if (indiceIA !== -1) {
+                  item.dataAssegnata = dataStr;
+                  item.giorno = getNomeGiorno(dataStr);
+                  item.selezionatoPerGiro = true;
+                  item._aiIndex = indiceIA; 
+                  nuoviAssegnati.push(item);
+                  assegnato = true;
+                  break;
+                }
+              }
+              
+              if (!assegnato) {
+                if (data.piano.sospesi && (data.piano.sospesi as string[]).includes(item.codice)) {
+                  item.selezionatoPerGiro = false;
+                  item.dataAssegnata = null;
+                  nuoviSospesi.push(item);
+                } else {
+                  if (item.dataAssegnata) {
+                    nuoviAssegnati.push(item);
+                  } else {
+                    item.selezionatoPerGiro = false;
+                    nuoviSospesi.push(item);
+                  }
+                }
+              }
+            });
+
+            nuoviAssegnati.sort((a, b) => {
+               if (a.dataAssegnata !== b.dataAssegnata) return 0;
+               return (a._aiIndex || 0) - (b._aiIndex || 0);
+            });
+
+            const resRic = await ricalcolaDistinteEOrari(nuoviAssegnati, giornateStats, false);
+            setInterventiGrezzi(resRic.listaOrdinata);
+            setGiornateStats(resRic.statsAggiornate);
+            setClientiInSospeso(nuoviSospesi);
+          } catch (recalcErr) {
+            console.error("Errore nel ricalcolo locale:", recalcErr);
+          }
+        }
       } else {
         setMessages(prev => [...prev, { sender: 'ai', text: 'Non sono riuscito ad applicare la modifica. Riprova.' }]);
       }
@@ -1144,7 +1341,7 @@ Tecnico: ${tecnicoNome}`;
         const event = {
           summary: generaTitoloEvento(clienteSospeso),
           location: `${clienteSospeso.indirizzo}, ${clienteSospeso.localita || 'Genova'}, Italia`,
-          description: generaDescrizioneEvento(clienteSospeso, tecnicoSelezionato.nome),
+          description: generaDescrizioneEvento(clienteSospeso, tecnicoSelezionato.nome, tecnicoSelezionato.email),
           start: { dateTime: startDateTime.toISOString(), timeZone: 'Europe/Rome' },
           end: { dateTime: endDateTime.toISOString(), timeZone: 'Europe/Rome' },
         };
@@ -1158,7 +1355,7 @@ Tecnico: ${tecnicoNome}`;
           const newClient = { ...clienteSospeso, settimana: `${formattaDataVisuale(dataInizio)} al ${formattaDataVisuale(dataFine)}`, giorno: giornoScelto, dataAssegnata: conf.data, oraInizio: conf.oraInizio, oraFine: `${hhEnd}:${mmEnd}`, selezionatoPerGiro: true, syncedToGoogle: true };
           
           setInElaborazione(true);
-          const resRic = await ricalcolaDistinteEOrari([...interventiGrezzi, newClient], giornateStats);
+          const resRic = await ricalcolaDistinteEOrari([...interventiGrezzi, newClient], giornateStats, true);
           setInterventiGrezzi(resRic.listaOrdinata);
           setGiornateStats(resRic.statsAggiornate);
           setInElaborazione(false);
@@ -1176,7 +1373,7 @@ Tecnico: ${tecnicoNome}`;
       const newClient = { ...clienteSospeso, settimana: `${formattaDataVisuale(dataInizio)} al ${formattaDataVisuale(dataFine)}`, giorno: getNomeGiorno(conf.data), dataAssegnata: conf.data, oraInizio: conf.oraInizio, oraFine: `${hhEnd}:${mmEnd}`, selezionatoPerGiro: true, syncedToGoogle: false };
       
       setInElaborazione(true);
-      const resRic = await ricalcolaDistinteEOrari([...interventiGrezzi, newClient], giornateStats);
+      const resRic = await ricalcolaDistinteEOrari([...interventiGrezzi, newClient], giornateStats, true);
       setInterventiGrezzi(resRic.listaOrdinata);
       setGiornateStats(resRic.statsAggiornate);
       setInElaborazione(false);
@@ -1203,7 +1400,7 @@ Tecnico: ${tecnicoNome}`;
         const event = {
             summary: generaTitoloEvento(cliente),
             location: `${cliente.indirizzo}, ${cliente.localita || 'Genova'}, Italia`,
-            description: generaDescrizioneEvento(cliente, tecnicoSelezionato.nome),
+            description: generaDescrizioneEvento(cliente, tecnicoSelezionato.nome, tecnicoSelezionato.email),
             start: { dateTime: startDateTime.toISOString(), timeZone: 'Europe/Rome' },
             end: { dateTime: endDateTime.toISOString(), timeZone: 'Europe/Rome' },
         };
@@ -1226,36 +1423,6 @@ Tecnico: ${tecnicoNome}`;
     setTimeout(() => setBulkSyncStatus({ active: false, progress: 0, current: 0, total: 0 }), 2000); 
   };
 
-  const handleDragStartReorder = (e: React.DragEvent, codice: string) => { e.dataTransfer.setData("application/reorder-lista", codice); };
-  const handleDragOverReorder = (e: React.DragEvent) => { e.preventDefault(); };
-
-  const handleDropReorder = async (e: React.DragEvent, targetCodice: string) => {
-    e.preventDefault();
-    const draggedCodice = e.dataTransfer.getData("application/reorder-lista");
-    if (!draggedCodice || draggedCodice === targetCodice) return;
-
-    setInElaborazione(true);
-    try {
-        const result = Array.from(interventiGrezzi);
-        const draggedIndex = result.findIndex(i => i.codice === draggedCodice);
-        const targetIndex = result.findIndex(i => i.codice === targetCodice);
-
-        if (draggedIndex === -1 || targetIndex === -1) {
-            setInElaborazione(false);
-            return;
-        }
-
-        const [removed] = result.splice(draggedIndex, 1);
-        result.splice(targetIndex, 0, removed);
-
-        const resRic = await ricalcolaDistinteEOrari(result, giornateStats);
-        setGiornateStats(resRic.statsAggiornate);
-        setInterventiGrezzi(resRic.listaOrdinata);
-    } finally {
-        setInElaborazione(false);
-    }
-  };
-
   const createNumberedIcon = (numero: number) => {
     if (leafletRef.current) {
       return leafletRef.current.divIcon({
@@ -1269,23 +1436,11 @@ Tecnico: ${tecnicoNome}`;
     return undefined;
   };
 
-  let currProgressivo = 0;
-  const interventiVisibiliArr = interventiGrezzi
-    .filter(i => giornoSceltoFiltro === "Tutti" || i.dataAssegnata === giornoSceltoFiltro)
-    .map(i => {
-       if (i.isDistinta || !i.selezionatoPerGiro || i.isPregresso) return { ...i, numProgressivo: null };
-       currProgressivo++;
-       return { ...i, numProgressivo: currProgressivo };
-    });
-
+  const interventiVisibiliArr = interventiGrezzi.filter(i => giornoSceltoFiltro === "Tutti" || i.dataAssegnata === giornoSceltoFiltro);
   const clientiAttiviCount = interventiVisibiliArr.filter(i => i.selezionatoPerGiro && !i.isDistinta && !i.isPregresso).length;
-  const globalAttiviCount = interventiGrezzi.filter(i => i.selezionatoPerGiro && !i.isDistinta && !i.isPregresso).length;
+  const globaleAssegnati = interventiGrezzi.filter(i => i.selezionatoPerGiro && !i.isDistinta && !i.isPregresso);
   const globalPregressiCount = interventiGrezzi.filter(i => i.isPregresso).length;
-  const totaleInCarico = globalAttiviCount + clientiInSospeso.length + globalPregressiCount;
-  
-  const calDataMin = dataInizio.replace(/-/g, '');
-  const calDataMax = dataFine.replace(/-/g, '');
-  const calendarEmbedUrl = `https://calendar.google.com/calendar/embed?src=${encodeURIComponent(tecnicoSelezionato.email)}&ctz=Europe%2FRome&mode=WEEK&showTitle=0&showPrint=0&dates=${calDataMin}%2F${calDataMax}`;
+  const totaleInCarico = globaleAssegnati.length + clientiInSospeso.length + globalPregressiCount;
   
   const giorniVisibiliPerStampa = [...new Set(interventiVisibiliArr.map(i => i.dataAssegnata))].sort();
 
@@ -1349,472 +1504,506 @@ Tecnico: ${tecnicoNome}`;
   }
 
   return (
-    <>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossOrigin="" />
-    
-    <style dangerouslySetInnerHTML={{__html: `
-      @media print {
-        body { background-color: white !important; margin: 0; padding: 0; }
-        @page { size: auto; margin: 10mm; }
-        .break-after-page { break-after: page; page-break-after: always; }
-        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-      }
-    `}} />
-
-    <main className="min-h-screen bg-slate-100 text-slate-900 font-sans p-6 md:p-10 overflow-x-hidden print:hidden flex lg:mr-[400px]">
-      <div className="max-w-7xl mx-auto flex-1">
-        
-        <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200 mb-8 gap-4">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-slate-900 flex items-center gap-3">
-              <span className="p-2.5 bg-blue-600 text-white rounded-xl shadow-md"><Zap size={24} /></span>
-              Asso Antincendio <span className="text-blue-600 font-normal text-xl">| Smart Logistics</span>
-            </h1>
-            <p className="text-xs text-slate-500 mt-1">Rubrica in memoria, Foglio Viaggio, Pausa Pranzo Dinamica & Assistente IA.</p>
-          </div>
-
-          <div className="flex flex-col gap-2 w-full md:w-auto">
-            <div className="flex items-center gap-2">
-              <Link 
-                href="/flussi" 
-                className="px-4 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-sm flex-1"
-              >
-                📊 Gestione Flussi
-              </Link>
-            </div>
-
-            <div className="flex items-center gap-4">
-              {isCheckingAuth ? (
-                <div className="bg-slate-50 text-slate-500 px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 border border-slate-200 text-sm w-full"><Loader2 size={18} className="animate-spin text-blue-600" /> Verifica connessione...</div>
-              ) : !googleToken ? (
-                <button onClick={eseguiLoginGoogle} className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm text-sm w-full"><Calendar size={18} /> Avvia Connessione Google</button>
-              ) : (
-                <div className="flex items-center gap-2 w-full">
-                  <span className="bg-emerald-50 text-emerald-800 px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 border border-emerald-200 text-sm flex-1"><Check size={18} /> Calendar Connesso</span>
-                  <button onClick={logoutGoogle} className="bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600 px-3 py-2.5 rounded-xl border border-slate-200 shrink-0"><X size={18} /></button>
-                </div>
-              )}
-            </div>
-            
-            <label className={`w-full py-2.5 rounded-xl font-bold text-xs shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${Object.keys(rubricaClienti).length > 0 ? 'bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-300'}`}>
-              <Book size={16} />
-              {Object.keys(rubricaClienti).length > 0 ? `Aggiorna Rubrica Clienti (${Object.keys(rubricaClienti).length} salvati)` : "Inserisci Rubrica Clienti"}
-              <input type="file" accept=".xlsx, .xls, .csv, .txt" className="hidden" onChange={handleRubricaUpload} />
-            </label>
-          </div>
-        </header>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between">
+    <div className="flex h-screen w-full bg-slate-100 text-slate-900 font-sans overflow-hidden print:h-auto print:overflow-visible print:bg-white">
+      <main className="flex-1 h-full overflow-y-auto custom-scrollbar p-6 md:p-10 print:p-0 print:overflow-visible relative">
+        <div className="w-full mx-auto">
+          
+          <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200 mb-8 gap-4 print:hidden">
             <div>
-              <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2 mb-4"><Calendar className="text-blue-600" size={18} /> 1. Configura Periodo</h2>
-              <div className="grid grid-cols-2 gap-3 mb-4">
-                <div><label className="text-[11px] font-bold text-slate-500 block mb-1">Dal</label><input type="date" value={dataInizio} onChange={(e) => setDataInizio(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold focus:outline-none" /></div>
-                <div><label className="text-[11px] font-bold text-slate-500 block mb-1">Al</label><input type="date" value={dataFine} onChange={(e) => setDataFine(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold focus:outline-none" /></div>
-              </div>
-              <div className="flex flex-wrap gap-1.5 mb-4">
-                {Object.keys(giorniAttivi).map((g) => <button key={g} onClick={() => toggleGiornoAttivo(g)} className={`px-2.5 py-1 rounded-lg text-xs font-bold ${giorniAttivi[g] ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400 line-through'}`}>{g.slice(0, 3)}</button>)}
-              </div>
+              <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-slate-900 flex items-center gap-3">
+                <span className="p-2.5 bg-blue-600 text-white rounded-xl shadow-md"><Zap size={24} /></span>
+                Asso Antincendio <span className="text-blue-600 font-normal text-xl">| Smart Logistics</span>
+              </h1>
+              <p className="text-xs text-slate-500 mt-1">Rubrica in memoria, Foglio Viaggio, Pausa Pranzo Dinamica & Assistente IA.</p>
             </div>
-          </div>
 
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
-             <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center bg-slate-50 flex flex-col items-center justify-center transition-all hover:border-blue-400 mb-4 h-full relative">
-               <div className="p-2 bg-blue-100 text-blue-600 rounded-xl mb-1"><FileSpreadsheet size={20} /></div>
-               <h2 className="text-sm font-bold text-slate-800 mb-1 truncate px-2 w-full max-w-[200px]" title={nomeFileCorrente}>{datiGrezziCaricati.length > 0 ? nomeFileCorrente : "Carica file cantieri"}</h2>
-               <label className={`bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-xl font-bold text-xs shadow-md transition-all inline-block mt-1 ${!googleToken ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
-                 {datiGrezziCaricati.length > 0 ? "Sostituisci" : "Sfoglia"}
-                 <input type="file" accept=".xlsx, .xls, .csv, .txt" className="hidden" onChange={handleFileUpload} disabled={!googleToken} />
-               </label>
-             </div>
-
-             <div className="border-t border-slate-100 pt-3 mt-3 flex flex-col gap-1.5">
-               <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1"><UserCheck size={14} className="text-blue-600"/> 2. Tecnico Operativo</label>
-               <select value={tecnicoSelezionato.nome} onChange={(e) => { const t = tecniciAnagrafica.find(t => t.nome === e.target.value); if(t) setTecnicoSelezionato(t); }} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-bold text-slate-800 focus:outline-none cursor-pointer">
-                  {tecniciAnagrafica.map((t, idx) => <option key={idx} value={t.nome}>{t.nome}</option>)}
-               </select>
-             </div>
-          </div>
-
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between items-center text-center">
-             <div className="w-full">
-               <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center justify-center gap-2 mb-2"><PlayCircle className="text-emerald-600" size={18} /> 3. Avvio Analisi Automatica</h2>
-               <p className="text-xs text-slate-500 mb-4">Incrocia percorsi stradali veri, pausa pranzo dinamica e incastri ottimali.</p>
-             </div>
-             
-             <div className="w-full flex flex-col gap-3 mt-auto">
-                 <button
-                   onClick={() => processaRighe(datiGrezziCaricati)}
-                   disabled={datiGrezziCaricati.length === 0 || inElaborazione}
-                   className={`w-full py-3 px-4 rounded-xl text-sm font-extrabold transition-all flex items-center justify-center gap-2 ${(datiGrezziCaricati.length > 0 && !inElaborazione) ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-md' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
-                 >
-                   {inElaborazione ? (
-                     <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin"/> Elaborazione in corso...</span>
-                   ) : (
-                     <span className="flex items-center gap-2"><Sliders size={16} /> Analizza & Crea Orari</span>
-                   )}
-                 </button>
-                 
-                 <label className="w-full py-2.5 px-4 rounded-xl text-[12px] font-bold transition-all flex items-center justify-center gap-2 border border-indigo-700 cursor-pointer bg-indigo-600 text-white hover:bg-indigo-700 shadow-md">
-                   <Search size={16} /> Verifica Insoluti (File Globale)
-                   <input type="file" accept=".xlsx, .xls, .csv, .txt" className="hidden" onChange={handleInsolutiUpload} />
-                 </label>
-             </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8 items-start">
-          <div className="bg-amber-50 border border-amber-300 rounded-2xl p-5 shadow-sm flex flex-col h-[600px]">
-            <h3 className="text-sm font-extrabold text-amber-900 flex items-center gap-2 mb-1"><PauseCircle size={18} className="text-amber-600" /> Sospesi ({clientiInSospeso.length})</h3>
-            <p className="text-[11px] text-amber-800 mb-4 leading-tight">Clicca per forzare pianificazione.</p>
-            
-            <div className="space-y-3 overflow-y-auto pr-2 flex-1">
-              {clientiInSospeso.map((s, idx) => {
-                  const isSosBloccato = s.resoEstintori && s.giorniDallUltimoSos < 5;
-                  return (
-                    <div 
-                        key={idx} 
-                        onClick={() => !isSosBloccato && apriModaleSospeso(s)}
-                        className={`bg-white border p-3 rounded-xl shadow-sm flex flex-col gap-1 transition-all ${isSosBloccato ? 'border-red-300 bg-red-50/40 opacity-70 cursor-not-allowed' : 'border-amber-200 hover:border-blue-400 hover:shadow-md cursor-pointer'}`}
-                    >
-                        <div className="flex justify-between items-start">
-                            <span className="bg-amber-100 text-amber-900 font-mono text-[9px] px-2 py-0.5 rounded font-bold">BI: {s.numeroBi}</span>
-                            <span className="text-[10px] text-slate-500 font-bold flex items-center gap-1"><Timer size={10} className="text-amber-600"/> {s.minutiLavoro}m</span>
-                        </div>
-                        <h4 className="font-bold text-slate-900 text-[11px] leading-tight mt-1">{s.nome}</h4>
-                        <p className="text-[10px] text-slate-500 truncate mt-0.5">{s.indirizzo}</p>
-                    </div>
-                  );
-              })}
-              {clientiInSospeso.length === 0 && <div className="text-center text-xs text-amber-700/60 mt-10 font-medium">Nessun sospeso.</div>}
-            </div>
-          </div>
-
-          <div className="lg:col-span-3 flex flex-col gap-6">
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-col h-[600px] overflow-hidden">
-              <div className="mb-4 flex justify-between items-center shrink-0">
-                <div>
-                   <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2 mb-1"><Calendar className="text-blue-600" size={18} /> Google Calendar ({tecnicoSelezionato.nome})</h3>
-                   <p className="text-[11px] text-slate-500 font-bold">Settimana visualizzata: {formattaDataVisuale(dataInizio)} - {formattaDataVisuale(dataFine)}</p>
-                </div>
+            <div className="flex flex-col gap-2 w-full md:w-auto">
+              <div className="flex items-center gap-2">
+                <Link 
+                  href="/flussi" 
+                  className="px-4 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-sm w-full"
+                >
+                  📊 Gestione Flussi
+                </Link>
               </div>
-              <div className="w-full flex-1 rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
-                <iframe key={tecnicoSelezionato.email} src={calendarEmbedUrl} style={{ border: 0 }} width="100%" height="100%" frameBorder="0" scrolling="no"></iframe>
-              </div>
-            </div>
-          </div>
-        </div>
 
-        {interventiGrezzi.length > 0 && leafletLoaded && (
-          <div className="w-full flex flex-col gap-6 mb-8">
-             <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col lg:flex-row gap-8 items-start">
-                <div className="flex-1 w-full">
-                   <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2 mb-5"><CheckCircle size={18} className="text-emerald-600" /> Riepilogo Pianificazione</h3>
-                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-                     <div className="p-3 bg-blue-50 rounded-xl border border-blue-200 flex flex-col justify-center">
-                        <span className="block text-[10px] text-blue-700 font-bold uppercase tracking-wider mb-0.5">Totale In Carico</span>
-                        <span className="text-2xl font-extrabold text-blue-900">{totaleInCarico}</span>
-                     </div>
-                     <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100 flex flex-col justify-center">
-                        <span className="block text-[10px] text-emerald-700 font-bold uppercase tracking-wider mb-0.5">Nuovi in Rotta</span>
-                        <span className="text-2xl font-extrabold text-emerald-900">{clientiAttiviCount}</span>
-                     </div>
-                     <div className="p-3 bg-amber-50 rounded-xl border border-amber-100 flex flex-col justify-center">
-                        <span className="block text-[10px] text-amber-700 font-bold uppercase tracking-wider mb-0.5">Finiti in Sospeso</span>
-                        <span className="text-2xl font-extrabold text-amber-900">{clientiInSospeso.length}</span>
-                     </div>
-                     <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex flex-col justify-center">
-                        <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-0.5">Già Fatti / Scartati</span>
-                        <span className="text-2xl font-extrabold text-slate-700">{clientiGiaCalendarizzati.length}</span>
-                     </div>
-                   </div>
-
-                   {bulkSyncStatus.active ? (
-                      <div className="bg-blue-50 border border-blue-200 p-3 rounded-xl flex flex-col gap-2 w-full">
-                         <div className="flex justify-between text-[11px] font-bold text-blue-800">
-                            <span className="flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> Invio in corso...</span>
-                            <span>{bulkSyncStatus.current} / {bulkSyncStatus.total}</span>
-                         </div>
-                         <div className="w-full bg-blue-200 rounded-full h-2">
-                            <div className="bg-blue-600 h-2 rounded-full transition-all duration-300" style={{width: `${bulkSyncStatus.progress}%`}}></div>
-                         </div>
-                      </div>
+              <div className="flex flex-col gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-2xl">
+                  <div className="flex items-center gap-2">
+                    {isCheckingAuth ? (
+                      <div className="text-slate-500 font-bold flex items-center justify-center gap-2 text-sm w-full py-2.5"><Loader2 size={18} className="animate-spin text-blue-600" /> Verifica...</div>
+                    ) : !googleToken ? (
+                      <button onClick={eseguiLoginGoogle} className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm text-sm w-full"><Calendar size={18} /> Avvia Connessione Google</button>
                     ) : (
-                      <button onClick={inviaPianificazioneAGoogle} disabled={inElaborazione} className="w-full md:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md text-xs transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-                        <UploadCloud size={16} /> Invia a Google ({interventiGrezzi.filter(i => i.selezionatoPerGiro && !i.syncedToGoogle && !i.isPregresso).length} pronti)
-                      </button>
+                      <div className="flex items-center gap-2 w-full">
+                        <span className="bg-emerald-50 text-emerald-800 px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 border border-emerald-200 text-sm flex-1"><Check size={18} /> Calendar Connesso</span>
+                        <button onClick={logoutGoogle} className="bg-white hover:bg-red-50 text-slate-600 hover:text-red-600 px-3 py-2.5 rounded-xl border border-slate-200 shadow-sm shrink-0"><X size={18} /></button>
+                      </div>
                     )}
-                </div>
+                  </div>
+                  
+                  <a 
+                    href="https://calendar.google.com" 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="bg-blue-100 text-blue-800 px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 border border-blue-200 shadow-sm text-xs transition-all hover:bg-blue-200"
+                  >
+                    <Phone size={16} /> Gestione Chiamate <ExternalLink size={14} className="opacity-60" />
+                  </a>
+              </div>
+              
+              <label className={`w-full py-2.5 rounded-xl font-bold text-xs shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${Object.keys(rubricaClienti).length > 0 ? 'bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-300'}`}>
+                <Book size={16} />
+                {Object.keys(rubricaClienti).length > 0 ? `Aggiorna Rubrica Clienti (${Object.keys(rubricaClienti).length} salvati)` : "Inserisci Rubrica Clienti"}
+                <input type="file" accept=".xlsx, .xls, .csv, .txt" className="hidden" onChange={handleRubricaUpload} />
+              </label>
+            </div>
+          </header>
 
-                <div className="flex-1 w-full lg:border-l border-slate-100 lg:pl-8 pt-6 lg:pt-0 border-t lg:border-t-0">
-                   <div className="flex justify-between items-center mb-4">
-                     <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Filtra per giornata:</p>
-                     <button onClick={() => setGiornoSceltoFiltro("Tutti")} className={`text-xs px-4 py-2 rounded-lg font-bold transition-all ${giornoSceltoFiltro === "Tutti" ? "bg-blue-600 text-white shadow-md" : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"}`}>Mostra Tutti</button>
-                   </div>
-                   
-                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                     {giornateStats.map((g, idx) => {
-                       const hh = String(Math.floor(g.orarioFineMinuti / 60)).padStart(2, '0');
-                       const mm = String(Math.floor(g.orarioFineMinuti % 60)).padStart(2, '0');
-                       
-                       return (
-                         <div key={idx} onClick={() => setGiornoSceltoFiltro(g.dataStr)} className={`p-3 border rounded-xl flex flex-col gap-0.5 cursor-pointer transition-all ${g.statoGiornata === "APERTO" ? 'bg-emerald-50/50 border-emerald-200 hover:bg-emerald-100' : 'bg-red-50/50 border-red-200 hover:bg-red-100'} ${giornoSceltoFiltro === g.dataStr ? 'ring-2 ring-blue-500 shadow-md scale-[1.02]' : 'opacity-80 hover:opacity-100'}`}>
-                           <span className="text-[12px] font-bold text-slate-800">{formattaDataVisuale(g.dataStr)}</span>
-                           <span className="text-[10px] text-slate-500">{g.nomeGiorno}</span>
-                           <div className="flex items-center gap-1.5 mt-1.5 font-mono text-[10px]">
-                              {g.statoGiornata === "APERTO" ? <CheckCircle size={12} className="text-emerald-500" /> : <Lock size={12} className="text-red-500" />}
-                              <span className={g.statoGiornata === "APERTO" ? "text-emerald-700 font-bold" : "text-red-700 font-bold"}>
-                                 Fine st.: {hh}:{mm}
-                              </span>
-                           </div>
-                         </div>
-                       )
-                     })}
-                   </div>
-                </div>
-             </div>
-          </div>
-        )}
-
-        {interventiGrezzi.length > 0 && leafletLoaded && (
-          <div className="w-full flex flex-col gap-6">
-            <div className={`bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative ${inElaborazione ? 'opacity-50 pointer-events-none' : ''}`}>
-              {inElaborazione && (
-                 <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/40 backdrop-blur-[2px]">
-                    <div className="bg-blue-600 text-white px-5 py-3 rounded-xl font-bold flex items-center gap-3 shadow-xl"><Loader2 size={20} className="animate-spin" /> Elaborazione rotte in corso...</div>
+          {/* RIEPILOGO PIANIFICAZIONE MOVED TO TOP */}
+          <div className="w-full mb-8 print:hidden">
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+               <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2 mb-5"><CheckCircle size={18} className="text-emerald-600" /> Riepilogo Pianificazione</h3>
+               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                 <div className="p-4 bg-blue-50 rounded-xl border border-blue-200 flex flex-col justify-center">
+                    <span className="block text-[11px] text-blue-700 font-bold uppercase tracking-wider mb-1">Totale In Carico</span>
+                    <span className="text-3xl font-extrabold text-blue-900">{totaleInCarico}</span>
                  </div>
-              )}
-              
-              <div className="p-6 border-b border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
-                <div>
-                  <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2"><Package className="text-blue-600"/> Lista Pianificati e Distinte | {tecnicoSelezionato.nome}</h3>
-                  <p className="text-xs text-slate-500 mt-1">Trascina le righe per riordinarle. Puoi deselezionarle o buttarle nei Sospesi col cestino!</p>
-                </div>
-                <button onClick={() => window.print()} className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-md text-sm transition-all"><Printer size={16} /> Stampa Foglio di Viaggio</button>
-              </div>
-              
-              <div className="overflow-x-auto overflow-y-auto max-h-[600px] relative border-b border-slate-200 bg-white">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500 tracking-wider sticky top-0 z-10 shadow-sm">
-                    <tr>
-                      <th className="p-4 w-12 text-center"></th>
-                      <th className="p-4 w-28 text-center">Giro</th>
-                      <th className="p-4">Riferimento BI & Cliente</th>
-                      <th className="p-4">Data e Orario</th>
-                      <th className="p-4 text-center">Scheda</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {interventiVisibiliArr.map((intervento) => {
-                      if (intervento.isDistinta) {
-                        return (
-                          <tr key={intervento.codice} className="bg-orange-50/50 border-b border-orange-100">
-                             <td className="p-4"></td>
-                             <td className="p-4 text-center"><Package size={20} className="text-orange-500 mx-auto" /></td>
-                             <td className="p-4">
-                               <span className="font-extrabold text-orange-900 text-sm block">{intervento.nome}</span>
-                               <span className="text-[10px] text-orange-700 font-bold block mt-1 uppercase tracking-wider">Basato sull'analisi a cascata dei Muletti.</span>
-                             </td>
-                             <td className="p-4">
-                               <span className="block text-[11px] text-slate-500 font-mono font-bold flex items-center gap-1.5 mb-1"><Clock size={12}/> {intervento.oraInizio} - {intervento.oraFine}</span>
-                               <span className="bg-orange-100 text-orange-800 px-3 py-1.5 rounded-xl text-xs font-bold border border-orange-200 inline-block">{formattaDataVisuale(intervento.dataAssegnata)} ({intervento.giorno})</span>
-                             </td>
-                             <td className="p-4 text-center">
-                               {intervento.syncedToGoogle && <span className="bg-emerald-50 text-emerald-700 px-2 py-1.5 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 border border-emerald-200 mb-1"><CheckCircle size={10} /> Inviato a Calendar</span>}
-                               <button onClick={() => setClienteSelezionatoScheda(intervento)} className="bg-orange-200 hover:bg-orange-300 text-orange-900 px-3.5 py-2 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow-sm block mx-auto mt-1"><FileText size={14} /> Dettagli Carico</button>
-                             </td>
-                          </tr>
-                        )
-                      }
-
-                      return (
-                        <tr 
-                          key={intervento.codice} 
-                          draggable
-                          onDragStart={(e) => handleDragStartReorder(e, intervento.codice)}
-                          onDragOver={handleDragOverReorder}
-                          onDrop={(e) => handleDropReorder(e, intervento.codice)}
-                          className={`hover:bg-slate-50 transition-colors cursor-grab active:cursor-grabbing ${!intervento.selezionatoPerGiro ? 'opacity-40 bg-slate-50/80' : ''} ${intervento.isPregresso ? 'bg-indigo-50/30' : ''}`}
-                        >
-                          <td className="p-4 text-center text-slate-300 hover:text-slate-500 align-middle"><GripVertical size={20} className="mx-auto" /></td>
-                          <td className="p-4 text-center align-middle">
-                            <div className="flex flex-col items-center gap-1.5">
-                               {intervento.numProgressivo !== null && !intervento.isPregresso && (
-                                  <span className="bg-blue-100 text-blue-800 font-extrabold w-6 h-6 rounded-full flex items-center justify-center text-[11px] shadow-sm">{intervento.numProgressivo}</span>
-                               )}
-                               {!intervento.isPregresso && (
-                                  <div className="flex items-center gap-2 mt-1">
-                                      <button onClick={() => toggleSelezioneCliente(intervento.codice)} className="text-blue-600 hover:scale-110 transition-transform">
-                                          {intervento.selezionatoPerGiro ? <CheckSquare size={18} /> : <Square size={18} className="text-slate-400" />}
-                                      </button>
-                                      <button onClick={() => rimuoviDaGiornata(intervento.codice)} className="text-red-500 hover:text-red-700 hover:scale-110 transition-transform bg-red-50 p-1.5 rounded-lg border border-red-100 shadow-sm">
-                                          <Trash2 size={15} />
-                                      </button>
-                                  </div>
-                               )}
-                               {intervento.isPregresso && <CalendarPlus size={18} className="text-indigo-400 mt-1" />}
-                            </div>
-                          </td>
-                          <td className="p-4">
-                            <span className="font-bold text-slate-900 text-sm block leading-tight">{generaTitoloEvento(intervento)}</span>
-                            {intervento.isPregresso && <span className="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-xl text-[9px] font-extrabold block w-max mt-1.5 border border-indigo-200">📌 GIÀ A CALENDARIO</span>}
-                            <div className="flex items-center gap-2 mt-1">
-                               <p className="text-slate-500 text-[11px]">{intervento.indirizzo} {intervento.localita ? `- ${intervento.localita}` : ""}</p>
-                            </div>
-                          </td>
-                          <td className="p-4">
-                            <span className="block text-[11px] text-slate-500 font-mono font-bold flex items-center gap-1.5 mb-1.5"><Clock size={12}/> {intervento.oraInizio} - {intervento.oraFine}</span>
-                            <div className="flex gap-1.5 mt-1.5">
-                               <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 w-max border border-emerald-100"><Timer size={10} /> {intervento.minutiLavoro} min</span>
-                            </div>
-                          </td>
-                          <td className="p-4 text-center">
-                             <button onClick={() => setClienteSelezionatoScheda(intervento)} className="bg-slate-100 hover:bg-blue-50 text-slate-700 px-3 py-1.5 rounded-lg text-[10px] font-bold inline-flex items-center gap-1.5 block mx-auto mt-1"><FileText size={12} /> Info</button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className={`bg-white p-6 rounded-2xl shadow-sm border border-slate-200 ${inElaborazione ? 'opacity-50 pointer-events-none' : ''}`}>
-              <h3 className="text-base font-bold mb-4 flex items-center gap-2 text-slate-900"><MapPin className="text-red-500" /> Mappa Percorso Ordinato</h3>
-              <div className="h-[480px] w-full rounded-xl overflow-hidden z-0 border border-slate-100">
-                <MapContainer key={giornoSceltoFiltro} center={[SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG]} zoom={12} style={{ height: "100%", width: "100%" }}>
-                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                  {interventiVisibiliArr.filter(i => i.lat && i.lng && !i.isDistinta && i.selezionatoPerGiro && !i.isPregresso).map((c) => (
-                    <Marker key={c.codice} position={[c.lat, c.lng]} icon={createNumberedIcon(c.numProgressivo)}>
-                      <Popup>
-                        <div className="p-2">
-                          <p className="font-bold text-sm text-slate-900">#{c.numProgressivo} - {c.nome}</p>
-                        </div>
-                      </Popup>
-                    </Marker>
-                  ))}
-                </MapContainer>
-              </div>
+                 <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100 flex flex-col justify-center">
+                    <span className="block text-[11px] text-emerald-700 font-bold uppercase tracking-wider mb-1">Nuovi in Rotta</span>
+                    <span className="text-3xl font-extrabold text-emerald-900">{clientiAttiviCount}</span>
+                 </div>
+                 <div className="p-4 bg-amber-50 rounded-xl border border-amber-100 flex flex-col justify-center">
+                    <span className="block text-[11px] text-amber-700 font-bold uppercase tracking-wider mb-1">Finiti in Sospeso</span>
+                    <span className="text-3xl font-extrabold text-amber-900">{clientiInSospeso.length}</span>
+                 </div>
+                 <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex flex-col justify-center">
+                    <span className="block text-[11px] text-slate-500 font-bold uppercase tracking-wider mb-1">Già Fatti / Scartati</span>
+                    <span className="text-3xl font-extrabold text-slate-700">{clientiGiaCalendarizzati.length}</span>
+                 </div>
+               </div>
             </div>
           </div>
-        )}
 
-        {/* MODALE ASSEGNAZIONE SOSPESI CON Z-[9999] */}
-        {sospesoInModifica && (
-          <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[9999] flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-8 relative border border-slate-200">
-              <button onClick={() => setSospesoInModifica(null)} className="absolute top-6 right-6 text-slate-400 bg-slate-100 p-2 rounded-full hover:bg-slate-200"><X size={18} /></button>
-              <div className="mb-6">
-                 <div className="p-3 bg-amber-100 text-amber-600 rounded-xl inline-block mb-4"><PauseCircle size={24} /></div>
-                 <h2 className="text-xl font-extrabold text-slate-900 leading-tight">Pianifica Sospeso</h2>
-                 <p className="text-xs text-slate-500 mt-1">{sospesoInModifica.nome}</p>
-              </div>
-              <div className="flex flex-col gap-4 mb-6">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 block mb-1">Data assegnazione</label>
-                  <input type="date" value={configSospesoSingolo.data} onChange={(e) => setConfigSospesoSingolo({...configSospesoSingolo, data: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-semibold text-slate-800 focus:outline-none" />
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8 print:hidden">
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between">
+              <div>
+                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2 mb-4"><Calendar className="text-blue-600" size={18} /> 1. Configura Periodo</h2>
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div><label className="text-[11px] font-bold text-slate-500 block mb-1">Dal</label><input type="date" value={dataInizio} onChange={(e) => setDataInizio(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold focus:outline-none" /></div>
+                  <div><label className="text-[11px] font-bold text-slate-500 block mb-1">Al</label><input type="date" value={dataFine} onChange={(e) => setDataFine(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold focus:outline-none" /></div>
                 </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 block mb-1">Ora Inizio stimata</label>
-                  <input type="time" value={configSospesoSingolo.oraInizio} onChange={(e) => setConfigSospesoSingolo({...configSospesoSingolo, oraInizio: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-semibold text-slate-800 focus:outline-none" />
+                <div className="flex flex-wrap gap-1.5 mb-4">
+                  {Object.keys(giorniAttivi).map((g) => <button key={g} onClick={() => toggleGiornoAttivo(g)} className={`px-2.5 py-1 rounded-lg text-xs font-bold ${giorniAttivi[g] ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400 line-through'}`}>{g.slice(0, 3)}</button>)}
                 </div>
-              </div>
-              <div className="flex flex-col gap-2.5">
-                 <button onClick={() => creaSospesoDaModale('calendar')} disabled={creazioneInCorso[sospesoInModifica.codice]} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 shadow-md transition-all">
-                    {creazioneInCorso[sospesoInModifica.codice] ? (
-                      <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin"/> Invio in corso...</span>
-                    ) : (
-                      <span className="flex items-center gap-2"><CalendarPlus size={16}/> Crea su Calendar</span>
-                    )}
-                 </button>
-                 <button onClick={() => creaSospesoDaModale('lista')} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-3.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all"><CheckSquare size={16}/> Aggiungi solo in Lista</button>
               </div>
             </div>
+
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+               <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center bg-slate-50 flex flex-col items-center justify-center transition-all hover:border-blue-400 mb-4 h-full relative">
+                 <div className="p-2 bg-blue-100 text-blue-600 rounded-xl mb-1"><FileSpreadsheet size={20} /></div>
+                 <h2 className="text-sm font-bold text-slate-800 mb-1 truncate px-2 w-full max-w-[200px]" title={nomeFileCorrente}>{datiGrezziCaricati.length > 0 ? nomeFileCorrente : "Carica file cantieri"}</h2>
+                 <label className={`bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-xl font-bold text-xs shadow-md transition-all inline-block mt-1 ${!googleToken ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
+                   {datiGrezziCaricati.length > 0 ? "Sostituisci" : "Sfoglia"}
+                   <input type="file" accept=".xlsx, .xls, .csv, .txt" className="hidden" onChange={handleFileUpload} disabled={!googleToken} />
+                 </label>
+               </div>
+
+               <div className="border-t border-slate-100 pt-3 mt-3 flex flex-col gap-1.5">
+                 <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1"><UserCheck size={14} className="text-blue-600"/> 2. Tecnico Operativo</label>
+                 <select value={tecnicoSelezionato.nome} onChange={(e) => { const t = tecniciAnagrafica.find(t => t.nome === e.target.value); if(t) setTecnicoSelezionato(t); }} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-bold text-slate-800 focus:outline-none cursor-pointer">
+                    {tecniciAnagrafica.map((t, idx) => <option key={idx} value={t.nome}>{t.nome}</option>)}
+                 </select>
+               </div>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between items-center text-center">
+               <div className="w-full flex flex-col gap-3 h-full justify-center">
+                   <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center justify-center gap-2 mb-2"><PlayCircle className="text-emerald-600" size={18} /> 3. Genera Plancia</h2>
+                   <p className="text-[11px] text-slate-500 mb-2">Lascia che l'Intelligenza Artificiale pianifichi i giri incrociando cantieri, ancore e limiti orari.</p>
+                   <button
+                     onClick={() => processaRighe(datiGrezziCaricati)}
+                     disabled={datiGrezziCaricati.length === 0 || inElaborazione}
+                     className={`w-full py-4 rounded-xl text-sm font-extrabold transition-all flex items-center justify-center gap-2 ${(datiGrezziCaricati.length > 0 && !inElaborazione) ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-md' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+                   >
+                     {inElaborazione ? <><Loader2 size={16} className="animate-spin"/> IA in elaborazione...</> : <><Sliders size={16} /> Analizza & Popola la Board</>}
+                   </button>
+               </div>
+            </div>
           </div>
-        )}
 
-        {/* MODALE SCHEDA TECNICA CLIENTE E DISTINTA CON Z-[9999] */}
-        {clienteSelezionatoScheda && (
-          <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[9999] flex items-center justify-center p-4 overflow-y-auto">
-            <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-8 relative border border-slate-200 my-auto max-h-[90vh] flex flex-col">
-              <button onClick={() => setClienteSelezionatoScheda(null)} className="absolute top-6 right-6 text-slate-400 bg-slate-100 p-2.5 rounded-full hover:bg-slate-200"><X size={20} /></button>
-              
-              {clienteSelezionatoScheda.isDistinta ? (
-                <>
-                  <div className="flex items-center gap-4 mb-6">
-                    <div className="p-4 bg-orange-100 text-orange-600 rounded-2xl"><Package size={32} /></div>
-                    <div>
-                      <span className="bg-orange-100 text-orange-800 font-mono text-xs px-3 py-1 rounded-xl font-bold mb-1 inline-block">REPORT MAGAZZINO</span>
-                      <h2 className="text-xl font-extrabold text-slate-900">Distinta di Carico</h2>
-                    </div>
-                  </div>
-                  <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 text-sm whitespace-pre-wrap font-mono leading-relaxed mb-6 overflow-y-auto flex-1">
-                    {clienteSelezionatoScheda.descrizioneDistinta}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="flex items-center gap-4 mb-6 pb-4 border-b border-slate-100">
-                    <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl"><FileText size={32} /></div>
-                    <div>
-                      <div className="flex gap-2 mb-1">
-                         <span className="bg-blue-100 text-blue-800 font-mono text-xs px-3 py-1 rounded-xl font-bold">BI: {clienteSelezionatoScheda.numeroBi}</span>
-                         {clienteSelezionatoScheda.haInsoluto && <span className="bg-red-100 text-red-800 font-mono text-xs px-3 py-1 rounded-xl font-bold">INSOLUTO [INS]</span>}
-                         {clienteSelezionatoScheda.resoEstintori && <span className="bg-amber-100 text-amber-800 font-mono text-xs px-3 py-1 rounded-xl font-bold">SOS [ESTINTORI]</span>}
-                      </div>
-                      <h2 className="text-2xl font-extrabold text-slate-900">{clienteSelezionatoScheda.nome}</h2>
-                      <p className="text-xs text-slate-500 font-medium mt-0.5">{clienteSelezionatoScheda.indirizzo}, {clienteSelezionatoScheda.localita}</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4 overflow-y-auto pr-2 flex-1 mb-6">
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200 text-xs">
-                        <div><strong className="text-slate-500 block mb-0.5">Referente / Contatto:</strong> <span className="font-bold text-slate-900">{clienteSelezionatoScheda.contatto || "Nessun referente specificato"}</span></div>
-                        <div><strong className="text-slate-500 block mb-0.5">Telefono:</strong> <span className="font-bold text-slate-900">{clienteSelezionatoScheda.telefono || "Nessun telefono"}</span></div>
-                        <div className="col-span-2"><strong className="text-slate-500 block mb-0.5">Email:</strong> <span className="font-bold text-slate-900">{clienteSelezionatoScheda.email || "Nessuna email"}</span></div>
-                     </div>
-
-                     <div>
-                        <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider mb-2">Attrezzature da Verificare ({clienteSelezionatoScheda.totaleArticoli || 0} pz):</h4>
-                        {clienteSelezionatoScheda.dettaglioAttrezzature && clienteSelezionatoScheda.dettaglioAttrezzature.length > 0 ? (
-                           <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
-                              {clienteSelezionatoScheda.dettaglioAttrezzature.map((att: any, idx: number) => (
-                                 <div key={idx} className="p-3 flex justify-between items-center bg-white text-xs">
-                                    <span className="font-bold text-slate-800">{att.descrizione}</span>
-                                    <span className="font-mono bg-slate-100 px-2.5 py-1 rounded-lg font-bold text-slate-700">Q.tà: {att.quantita}</span>
-                                 </div>
-                              ))}
-                           </div>
+          {/* INTERFACCIA KANBAN DRAG & DROP */}
+          {interventiGrezzi.length > 0 && (
+            <div className={`mb-10 relative print:hidden ${inElaborazione ? 'opacity-50 pointer-events-none' : ''}`}>
+               
+               <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                   <div>
+                      <h2 className="text-xl font-extrabold text-slate-900 flex items-center gap-2"><GripVertical className="text-blue-600" /> Plancia Operativa Settimanale</h2>
+                      <p className="text-xs text-slate-500">Trascina le schede tra le colonne per affinare la programmazione. O rilascia una scheda su un'altra per posizionarla esattamente lì.</p>
+                   </div>
+                   <div className="flex gap-4">
+                       {bulkSyncStatus.active ? (
+                            <div className="bg-blue-50 border border-blue-200 px-4 py-2.5 rounded-xl flex items-center gap-3 text-xs font-bold text-blue-800">
+                                <Loader2 size={14} className="animate-spin"/> Sync a Calendar... {bulkSyncStatus.current} / {bulkSyncStatus.total}
+                            </div>
                         ) : (
-                           <p className="text-xs text-slate-400 italic bg-slate-50 p-3 rounded-xl border border-slate-200">Nessuna attrezzatura dettagliata trovata per questo cantiere.</p>
-                        )}
-                     </div>
+                            <button onClick={inviaPianificazioneAGoogle} className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md text-xs transition-all">
+                                <UploadCloud size={16} /> Salva su Google Calendar ({globaleAssegnati.filter(i=>!i.syncedToGoogle).length})
+                            </button>
+                       )}
+                   </div>
+               </div>
 
-                     <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 flex justify-between items-center text-xs">
-                        <div>
-                           <strong className="text-emerald-800 block">Tempo stimato di intervento:</strong>
-                           <span className="text-emerald-900 font-extrabold text-sm">{clienteSelezionatoScheda.minutiLavoro} minuti</span>
-                        </div>
-                        <div className="text-right">
-                           <strong className="text-emerald-800 block">Orario Assegnato:</strong>
-                           <span className="text-emerald-900 font-mono font-extrabold text-sm">{clienteSelezionatoScheda.oraInizio} - {clienteSelezionatoScheda.oraFine}</span>
-                        </div>
-                     </div>
+               {/* Layout separato per impedire l'accavallamento dei Sospesi con il Lunedì */}
+               <div className="flex items-start gap-4 pb-4 w-full">
+                   
+                   {/* COLONNA SOSPESI - STATICA A SINISTRA (NON PIU' STICKY) */}
+                   <div 
+                       className="min-w-[320px] max-w-[320px] h-[70vh] min-h-[500px] max-h-[800px] bg-slate-200 border-2 border-slate-300 rounded-3xl p-4 flex flex-col shrink-0 z-20 shadow-xl"
+                       onDragOver={handleDragOverKanban}
+                       onDrop={handleDropToSospesi}
+                   >
+                       <h3 className="font-extrabold text-slate-800 mb-4 flex justify-between items-center px-1">
+                           <span className="flex items-center gap-1.5"><PauseCircle size={16}/> SOSPESI</span>
+                           <span className="bg-slate-800 text-white px-2.5 py-0.5 rounded-full text-[10px] shadow-sm">{clientiInSospeso.length}</span>
+                       </h3>
+                       <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+                           {clientiInSospeso.map(item => (
+                              <div 
+                                  key={item.codice} 
+                                  draggable={!(item.resoEstintori && item.giorniDallUltimoSos < 5)}
+                                  onDragStart={(e) => handleDragStartKanban(e, item.codice)}
+                                  onClick={() => !(item.resoEstintori && item.giorniDallUltimoSos < 5) && apriModaleSospeso(item)}
+                                  className={`bg-white border p-3 rounded-xl shadow-sm flex flex-col gap-1 transition-all ${(item.resoEstintori && item.giorniDallUltimoSos < 5) ? 'border-red-300 bg-red-50/40 opacity-70 cursor-not-allowed' : 'border-amber-200 hover:border-blue-400 hover:shadow-md cursor-grab active:cursor-grabbing relative'}`}
+                              >
+                                  <div className="flex justify-between items-start">
+                                      <span className="bg-amber-100 text-amber-900 font-mono text-[9px] px-2 py-0.5 rounded font-bold">BI: {item.numeroBi}</span>
+                                      <span className="text-[10px] text-slate-500 font-bold flex items-center gap-1"><Timer size={10} className="text-amber-600"/> {item.minutiLavoro}m</span>
+                                  </div>
+                                  <h4 className="font-bold text-slate-900 text-[11px] leading-tight mt-1 pr-6">{item.nome}</h4>
+                                  <p className="text-[10px] text-slate-500 truncate mt-0.5">{item.indirizzo}</p>
+                                  <button onClick={(e) => { e.stopPropagation(); setClienteSelezionatoScheda(item); }} className="absolute top-2 right-2 text-slate-400 hover:text-blue-600 bg-slate-50 p-1.5 rounded-lg transition-colors"><FileText size={12}/></button>
+                              </div>
+                           ))}
+                           {clientiInSospeso.length === 0 && <div className="text-center text-xs text-slate-400 mt-10 font-bold border-2 border-dashed border-slate-300 p-4 rounded-xl">Nessun sospeso. Trascina qui le schede da scartare.</div>}
+                       </div>
+                   </div>
+
+                   {/* CONTENITORE GIORNI SCROLLABILE INDIPENDENTE */}
+                   <div className="flex overflow-x-auto items-start gap-4 pb-4 w-full snap-x custom-scrollbar h-[70vh] min-h-[500px] max-h-[800px]">
+                       {giornateStats.map(g => {
+                           const taskGiorno = interventiGrezzi.filter(i => i.selezionatoPerGiro && i.dataAssegnata === g.dataStr);
+                           const isOvertime = g.orarioFineMinuti > 1080; // > 18:00
+                           const hh = String(Math.floor(g.orarioFineMinuti / 60)).padStart(2, '0');
+                           const mm = String(Math.floor(g.orarioFineMinuti % 60)).padStart(2, '0');
+
+                           return (
+                             <div 
+                                 key={g.dataStr}
+                                 className={`min-w-[340px] max-w-[340px] h-full bg-slate-50 border-2 rounded-3xl p-4 flex flex-col snap-start shrink-0 transition-all ${isOvertime ? 'border-red-400 shadow-[0_0_20px_rgba(239,68,68,0.15)] bg-red-50/50' : 'border-slate-200 shadow-sm'}`}
+                                 onDragOver={handleDragOverKanban}
+                                 onDrop={(e) => handleDropToDay(e, g.dataStr)}
+                             >
+                                 <div className="mb-4 pb-4 border-b border-slate-200 px-1">
+                                     <div className="flex justify-between items-start mb-2">
+                                         <h3 className="font-extrabold text-slate-900 text-lg uppercase tracking-tight">{g.nomeGiorno}</h3>
+                                         <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-1 rounded-lg">{formattaDataVisuale(g.dataStr)}</span>
+                                     </div>
+                                     
+                                     {isOvertime ? (
+                                         <div className="bg-red-100 text-red-800 text-[11px] font-bold px-2.5 py-1.5 rounded-lg flex items-center justify-between shadow-sm">
+                                             <span className="flex items-center gap-1.5"><AlertOctagon size={14}/> OVERTIME TURNO:</span>
+                                             <span className="text-sm">{hh}:{mm}</span>
+                                         </div>
+                                     ) : (
+                                         <div className="bg-emerald-100 text-emerald-800 text-[11px] font-bold px-2.5 py-1.5 rounded-lg flex items-center justify-between shadow-sm">
+                                             <span className="flex items-center gap-1.5"><CheckCircle size={14}/> Fine turno stimata:</span>
+                                             <span className="text-sm">{hh}:{mm}</span>
+                                         </div>
+                                     )}
+                                 </div>
+                                 
+                                 <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+                                     {taskGiorno.length === 0 && <div className="text-center text-xs text-slate-400 mt-10 font-bold border-2 border-dashed border-slate-200 p-4 rounded-xl">Giorno vuoto. Trascina qui le schede.</div>}
+                                     {taskGiorno.map(item => (
+                                        <div 
+                                            key={item.codice}
+                                            draggable={!item.isPregresso && !item.isDistinta}
+                                            onDragStart={(e) => handleDragStartKanban(e, item.codice)}
+                                            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverCard(item.codice); }}
+                                            onDragLeave={() => setDragOverCard(null)}
+                                            onDrop={(e) => handleDropToDay(e, g.dataStr, item.codice)}
+                                            className={`p-3 rounded-xl border bg-white shadow-sm text-left relative transition-all
+                                                ${dragOverCard === item.codice ? 'border-t-4 border-t-blue-500 mt-2' : ''}
+                                                ${item.isPregresso ? 'border-indigo-200 bg-indigo-50/50 cursor-not-allowed' : item.isDistinta ? 'border-orange-200 bg-orange-50/50 cursor-default' : 'border-slate-200 hover:border-blue-400 cursor-grab active:cursor-grabbing'}
+                                            `}
+                                        >
+                                           <div className="flex justify-between items-start mb-1.5">
+                                              {item.isDistinta ? (
+                                                <span className="bg-orange-100 text-orange-800 text-[9px] font-extrabold px-2 py-0.5 rounded-md flex items-center gap-1"><Package size={10}/> MAGAZZINO</span>
+                                              ) : item.isPregresso ? (
+                                                <span className="bg-indigo-100 text-indigo-800 text-[9px] font-extrabold px-2 py-0.5 rounded-md flex items-center gap-1"><CalendarPlus size={10}/> PREGRESSO</span>
+                                              ) : (
+                                                <span className="bg-slate-100 text-slate-700 text-[9px] font-mono font-bold px-2 py-0.5 rounded-md border border-slate-200">BI: {item.numeroBi}</span>
+                                              )}
+                                              {!item.isDistinta && (
+                                                  <span className="text-[10px] font-mono font-bold text-slate-600 flex items-center gap-1"><Clock size={10}/> {item.oraInizio}-{item.oraFine}</span>
+                                              )}
+                                           </div>
+                                           <p className={`font-bold text-[11px] leading-tight mt-1 pr-6 ${item.isDistinta ? 'text-orange-900' : 'text-slate-900'}`}>{item.nome}</p>
+                                           <div className="flex justify-between items-end mt-2">
+                                               <p className="text-[9px] text-slate-500 font-medium truncate w-[70%]"><MapPin size={10} className="inline mr-0.5"/>{item.localita || item.indirizzo}</p>
+                                               <div className="flex items-center gap-1.5">
+                                                  {item.resoEstintori && <span className="text-amber-600" title="SOS"><AlertTriangle size={12}/></span>}
+                                                  {!item.isPregresso && !item.isDistinta && <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded text-[9px] font-bold border border-emerald-100">{item.minutiLavoro}m</span>}
+                                               </div>
+                                           </div>
+                                           <button onClick={() => setClienteSelezionatoScheda(item)} className="absolute top-2 right-2 text-slate-400 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 p-1.5 rounded-lg transition-colors"><FileText size={12}/></button>
+                                        </div>
+                                     ))}
+                                 </div>
+                             </div>
+                           )
+                       })}
+                   </div>
+               </div>
+            </div>
+          )}
+
+          {/* MAPPA IN BASSO CON FILTRI ACCORPATI */}
+          {interventiGrezzi.length > 0 && leafletLoaded && (
+            <div className="w-full flex flex-col gap-6 mb-8 print:hidden">
+              <div className={`bg-white p-6 rounded-2xl shadow-sm border border-slate-200 ${inElaborazione ? 'opacity-50 pointer-events-none' : ''}`}>
+                
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 border-b border-slate-100 pb-4">
+                  <h3 className="text-lg font-extrabold flex items-center gap-2 text-slate-900"><MapPin className="text-red-500" /> Mappa Globale Cantieri</h3>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider hidden md:block">Filtra per giornata:</span>
+                    <button onClick={() => setGiornoSceltoFiltro("Tutti")} className={`text-xs px-4 py-2 rounded-lg font-bold transition-all ${giornoSceltoFiltro === "Tutti" ? "bg-blue-600 text-white shadow-md" : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"}`}>Mostra Tutti</button>
                   </div>
-                </>
-              )}
+                </div>
 
-              <div className="flex gap-4 pt-4 border-t border-slate-100">
-                <button onClick={() => setClienteSelezionatoScheda(null)} className="flex-1 bg-slate-900 text-white px-6 py-3 rounded-xl text-xs font-bold shadow-md hover:bg-slate-800 transition-all">Chiudi Scheda</button>
+                <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6">
+                  {giornateStats.map((g, idx) => {
+                    const minVal = g.orarioFineMinuti || g.orarioPartenzaMinuti || 480;
+                    const isOvertime = minVal > 1080;
+                    const hh = String(Math.floor(minVal / 60)).padStart(2, '0');
+                    const mm = String(Math.floor(minVal % 60)).padStart(2, '0');
+                    
+                    return (
+                      <div key={idx} onClick={() => setGiornoSceltoFiltro(g.dataStr)} className={`p-3 border rounded-xl flex flex-col gap-0.5 cursor-pointer transition-all ${isOvertime ? 'bg-red-50/50 border-red-200 hover:bg-red-100' : 'bg-emerald-50/50 border-emerald-200 hover:bg-emerald-100'} ${giornoSceltoFiltro === g.dataStr ? 'ring-2 ring-blue-500 shadow-md scale-[1.02]' : 'opacity-80 hover:opacity-100'}`}>
+                        <span className="text-[12px] font-bold text-slate-800">{formattaDataVisuale(g.dataStr)}</span>
+                        <span className="text-[10px] text-slate-500">{g.nomeGiorno}</span>
+                        <div className="flex items-center gap-1.5 mt-1.5 font-mono text-[10px]">
+                           {isOvertime ? <AlertOctagon size={12} className="text-red-500" /> : <CheckCircle size={12} className="text-emerald-500" />}
+                           <span className={isOvertime ? "text-red-700 font-bold" : "text-emerald-700 font-bold"}>
+                              Fine st.: {hh}:{mm}
+                           </span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div className="h-[480px] w-full rounded-xl overflow-hidden z-0 border border-slate-100 relative">
+                  <MapContainer key={giornoSceltoFiltro} center={[SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG]} zoom={11} style={{ height: "100%", width: "100%" }}>
+                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                    {interventiGrezzi.filter(i => (giornoSceltoFiltro === "Tutti" || i.dataAssegnata === giornoSceltoFiltro) && i.lat && i.lng && !i.isDistinta && i.selezionatoPerGiro).map((c, idx) => (
+                      <Marker key={c.codice} position={[c.lat, c.lng]} icon={createNumberedIcon(idx + 1)}>
+                        <Popup>
+                          <div className="p-2">
+                            <p className="font-bold text-sm text-slate-900">{c.nome}</p>
+                          </div>
+                        </Popup>
+                      </Marker>
+                    ))}
+                  </MapContainer>
+                </div>
               </div>
             </div>
+          )}
+
+          {/* MODALI IN Z-INDEX MASSIMO Z-[9999] */}
+          {sospesoInModifica && (
+            <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[9999] flex items-center justify-center p-4">
+              <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-8 relative border border-slate-200">
+                <button onClick={() => setSospesoInModifica(null)} className="absolute top-6 right-6 text-slate-400 bg-slate-100 p-2 rounded-full hover:bg-slate-200"><X size={18} /></button>
+                <div className="mb-6">
+                   <div className="p-3 bg-amber-100 text-amber-600 rounded-xl inline-block mb-4"><PauseCircle size={24} /></div>
+                   <h2 className="text-xl font-extrabold text-slate-900 leading-tight">Pianifica Sospeso</h2>
+                   <p className="text-xs text-slate-500 mt-1">{sospesoInModifica.nome}</p>
+                </div>
+                <div className="flex flex-col gap-4 mb-6">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Data assegnazione</label>
+                    <input type="date" value={configSospesoSingolo.data} onChange={(e) => setConfigSospesoSingolo({...configSospesoSingolo, data: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-semibold text-slate-800 focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Ora Inizio stimata</label>
+                    <input type="time" value={configSospesoSingolo.oraInizio} onChange={(e) => setConfigSospesoSingolo({...configSospesoSingolo, oraInizio: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-semibold text-slate-800 focus:outline-none" />
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2.5">
+                   <button onClick={() => creaSospesoDaModale('calendar')} disabled={creazioneInCorso[sospesoInModifica.codice]} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 shadow-md transition-all">
+                      {creazioneInCorso[sospesoInModifica.codice] ? (
+                        <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin"/> Invio in corso...</span>
+                      ) : (
+                        <span className="flex items-center gap-2"><CalendarPlus size={16}/> Crea su Calendar</span>
+                      )}
+                   </button>
+                   <button onClick={() => creaSospesoDaModale('lista')} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-3.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all"><CheckSquare size={16}/> Aggiungi solo in Lista</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {clienteSelezionatoScheda && (
+            <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[9999] flex items-center justify-center p-4 overflow-y-auto">
+              <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-8 relative border border-slate-200 my-auto max-h-[90vh] flex flex-col">
+                <button onClick={() => setClienteSelezionatoScheda(null)} className="absolute top-6 right-6 text-slate-400 bg-slate-100 p-2.5 rounded-full hover:bg-slate-200"><X size={20} /></button>
+                
+                {clienteSelezionatoScheda.isDistinta ? (
+                  <>
+                    <div className="flex items-center gap-4 mb-6">
+                      <div className="p-4 bg-orange-100 text-orange-600 rounded-2xl"><Package size={32} /></div>
+                      <div>
+                        <span className="bg-orange-100 text-orange-800 font-mono text-xs px-3 py-1 rounded-xl font-bold mb-1 inline-block">REPORT MAGAZZINO</span>
+                        <h2 className="text-xl font-extrabold text-slate-900">Distinta di Carico</h2>
+                      </div>
+                    </div>
+                    <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 text-sm whitespace-pre-wrap font-mono leading-relaxed mb-6 overflow-y-auto flex-1">
+                      {clienteSelezionatoScheda.descrizioneDistinta}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-4 mb-6 pb-4 border-b border-slate-100">
+                      <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl"><FileText size={32} /></div>
+                      <div>
+                        <div className="flex gap-2 mb-1">
+                           <span className="bg-blue-100 text-blue-800 font-mono text-xs px-3 py-1 rounded-xl font-bold">BI: {clienteSelezionatoScheda.numeroBi}</span>
+                           {clienteSelezionatoScheda.haInsoluto && <span className="bg-red-100 text-red-800 font-mono text-xs px-3 py-1 rounded-xl font-bold">INSOLUTO [INS]</span>}
+                           {clienteSelezionatoScheda.resoEstintori && <span className="bg-amber-100 text-amber-800 font-mono text-xs px-3 py-1 rounded-xl font-bold">SOS [ESTINTORI]</span>}
+                        </div>
+                        <h2 className="text-2xl font-extrabold text-slate-900">{clienteSelezionatoScheda.nome}</h2>
+                        <p className="text-xs text-slate-500 font-medium mt-0.5">{clienteSelezionatoScheda.indirizzo}, {clienteSelezionatoScheda.localita}</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4 overflow-y-auto pr-2 flex-1 mb-6">
+                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200 text-xs">
+                          <div><strong className="text-slate-500 block mb-0.5">Referente / Contatto:</strong> <span className="font-bold text-slate-900">{clienteSelezionatoScheda.contatto || "Nessun referente specificato"}</span></div>
+                          <div><strong className="text-slate-500 block mb-0.5">Telefono:</strong> <span className="font-bold text-slate-900">{clienteSelezionatoScheda.telefono || "Nessun telefono"}</span></div>
+                          <div className="col-span-2"><strong className="text-slate-500 block mb-0.5">Email:</strong> <span className="font-bold text-slate-900">{clienteSelezionatoScheda.email || "Nessuna email"}</span></div>
+                       </div>
+
+                       <div>
+                          <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider mb-2">Attrezzature da Verificare ({clienteSelezionatoScheda.totaleArticoli || 0} pz):</h4>
+                          {clienteSelezionatoScheda.dettaglioAttrezzature && clienteSelezionatoScheda.dettaglioAttrezzature.length > 0 ? (
+                             <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
+                                {clienteSelezionatoScheda.dettaglioAttrezzature.map((att: any, idx: number) => (
+                                   <div key={idx} className="p-3 flex justify-between items-center bg-white text-xs">
+                                      <span className="font-bold text-slate-800">{att.descrizione}</span>
+                                      <span className="font-mono bg-slate-100 px-2.5 py-1 rounded-lg font-bold text-slate-700">Q.tà: {att.quantita}</span>
+                                   </div>
+                                ))}
+                             </div>
+                          ) : (
+                             <p className="text-xs text-slate-400 italic bg-slate-50 p-3 rounded-xl border border-slate-200">Nessuna attrezzatura dettagliata trovata per questo cantiere.</p>
+                          )}
+                       </div>
+
+                       <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 flex justify-between items-center text-xs">
+                          <div>
+                             <strong className="text-emerald-800 block">Tempo stimato di intervento:</strong>
+                             <span className="text-emerald-900 font-extrabold text-sm">{clienteSelezionatoScheda.minutiLavoro} minuti</span>
+                          </div>
+                          <div className="text-right">
+                             <strong className="text-emerald-800 block">Orario Assegnato:</strong>
+                             <span className="text-emerald-900 font-mono font-extrabold text-sm">{clienteSelezionatoScheda.oraInizio} - {clienteSelezionatoScheda.oraFine}</span>
+                          </div>
+                       </div>
+                    </div>
+                  </>
+                )}
+
+                <div className="flex gap-4 pt-4 border-t border-slate-100">
+                  <button onClick={() => setClienteSelezionatoScheda(null)} className="flex-1 bg-slate-900 text-white px-6 py-3 rounded-xl text-xs font-bold shadow-md hover:bg-slate-800 transition-all">Chiudi Scheda</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* VISTA STAMPA (INCLUSA NEL MAIN PER FUNZIONARE CON IL FLEX LAYOUT) */}
+          <div className="hidden print:block w-full text-black bg-white font-sans text-sm">
+             {giorniVisibiliPerStampa.map((dataStr) => {
+                const interventiGiorno = interventiVisibiliArr.filter(i => i.dataAssegnata === dataStr && (i.selezionatoPerGiro || i.isPregresso));
+                if (interventiGiorno.length === 0) return null;
+
+                const distinta = interventiGiorno.find(i => i.isDistinta);
+                const lavori = interventiGiorno.filter(i => !i.isDistinta).sort((a,b) => a.oraInizio.localeCompare(b.oraInizio));
+                const nomeGiorno = getNomeGiorno(dataStr);
+
+                return (
+                   <div key={dataStr} className="break-after-page mb-10">
+                      <div className="border-b-2 border-black pb-3 mb-6 flex justify-between items-end">
+                         <div>
+                           <h1 className="text-2xl font-extrabold uppercase tracking-tight">FOGLIO DI VIAGGIO</h1>
+                           <p className="text-gray-600 font-bold mt-1 uppercase">{nomeGiorno} {formattaDataVisuale(dataStr)}</p>
+                         </div>
+                         <div className="text-right">
+                           <p className="text-xs uppercase text-gray-500 font-bold mb-1">Tecnico Assegnato</p>
+                           <p className="text-lg font-extrabold">{tecnicoSelezionato.nome}</p>
+                         </div>
+                      </div>
+
+                      {distinta && (
+                        <div className="mb-6 p-4 border border-black bg-gray-50 rounded-lg">
+                           <h2 className="font-extrabold text-base mb-2 uppercase flex items-center gap-2"><Package size={18} /> Distinta di Carico Magazzino</h2>
+                           <pre className="font-mono text-xs whitespace-pre-wrap">{distinta.descrizioneDistinta}</pre>
+                        </div>
+                      )}
+
+                      <div className="mt-4">
+                         <h2 className="font-extrabold text-base mb-3 uppercase border-b border-black pb-1">Elenco Interventi Giornalieri</h2>
+                         <table className="w-full text-left text-xs border-collapse border border-black">
+                            <thead>
+                               <tr className="bg-gray-100 border-b border-black">
+                                  <th className="p-2 border border-black w-24">Orario</th>
+                                  <th className="p-2 border border-black w-48">Riferimento BI & Cliente</th>
+                                  <th className="p-2 border border-black">Indirizzo & Località</th>
+                                  <th className="p-2 border border-black">Attrezzature / Note</th>
+                               </tr>
+                            </thead>
+                            <tbody>
+                               {lavori.map((lav, idx) => (
+                                  <tr key={idx} className="border-b border-black">
+                                     <td className="p-2 border border-black font-mono font-bold align-top">{lav.oraInizio} - {lav.oraFine}</td>
+                                     <td className="p-2 border border-black font-bold align-top">
+                                        {lav.nome}
+                                        <span className="block font-mono font-normal text-[10px] text-gray-600 mt-0.5">BI: {lav.numeroBi}</span>
+                                     </td>
+                                     <td className="p-2 border border-black align-top">{lav.indirizzo} {lav.localita ? `- ${lav.localita}` : ""}</td>
+                                     <td className="p-2 border border-black align-top text-[11px]">
+                                        {lav.dettaglioAttrezzature && lav.dettaglioAttrezzature.length > 0 
+                                           ? lav.dettaglioAttrezzature.map((d: any) => `${d.descrizione}: ${d.quantita}`).join(", ") 
+                                           : "Verifica standard"}
+                                     </td>
+                                  </tr>
+                               ))}
+                            </tbody>
+                         </table>
+                      </div>
+                   </div>
+                )
+             })}
           </div>
-        )}
 
-      </div>
+        </div>
+      </main>
 
+      {/* CHAT FISSA A DESTRA PER RISOLVERE IL BUG DI IMPAGINAZIONE */}
       {isChatOpen && (
-        <aside className="fixed right-0 top-0 h-screen w-[400px] bg-white border-l border-slate-200 flex flex-col shadow-2xl z-50 shrink-0">
+        <aside className="w-[400px] h-full bg-white border-l border-slate-200 flex flex-col shadow-2xl shrink-0 print:hidden z-50">
           <div className="p-4 bg-gradient-to-r from-slate-900 to-slate-800 text-white flex justify-between items-center shadow-md">
             <div className="flex items-center gap-2.5">
               <span className="p-2 bg-amber-500 text-white rounded-xl shadow"><Zap size={16} /></span>
@@ -1825,7 +2014,7 @@ Tecnico: ${tecnicoNome}`;
             </div>
           </div>
 
-          <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50/70">
+          <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50/70 custom-scrollbar">
             {messages.map((msg, idx) => (
               <div key={idx} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-xs leading-relaxed shadow-sm ${
@@ -1844,6 +2033,7 @@ Tecnico: ${tecnicoNome}`;
                 </div>
               </div>
             )}
+            <div ref={messagesEndRef} />
           </div>
 
           <form onSubmit={handleSendMessage} className="p-4 bg-white border-t border-slate-200 flex gap-2 items-center">
@@ -1864,71 +2054,7 @@ Tecnico: ${tecnicoNome}`;
           </form>
         </aside>
       )}
-    </main>
-
-    <div className="hidden print:block w-full text-black bg-white font-sans text-sm">
-       {giorniVisibiliPerStampa.map((dataStr) => {
-          const interventiGiorno = interventiVisibiliArr.filter(i => i.dataAssegnata === dataStr && (i.selezionatoPerGiro || i.isPregresso));
-          if (interventiGiorno.length === 0) return null;
-
-          const distinta = interventiGiorno.find(i => i.isDistinta);
-          const lavori = interventiGiorno.filter(i => !i.isDistinta).sort((a,b) => a.oraInizio.localeCompare(b.oraInizio));
-          const nomeGiorno = getNomeGiorno(dataStr);
-
-          return (
-             <div key={dataStr} className="break-after-page mb-10">
-                <div className="border-b-2 border-black pb-3 mb-6 flex justify-between items-end">
-                   <div>
-                     <h1 className="text-2xl font-extrabold uppercase tracking-tight">FOGLIO DI VIAGGIO</h1>
-                     <p className="text-gray-600 font-bold mt-1 uppercase">{nomeGiorno} {formattaDataVisuale(dataStr)}</p>
-                   </div>
-                   <div className="text-right">
-                     <p className="text-xs uppercase text-gray-500 font-bold mb-1">Tecnico Assegnato</p>
-                     <p className="text-lg font-extrabold">{tecnicoSelezionato.nome}</p>
-                   </div>
-                </div>
-
-                {distinta && (
-                  <div className="mb-6 p-4 border border-black bg-gray-50 rounded-lg">
-                     <h2 className="font-extrabold text-base mb-2 uppercase flex items-center gap-2"><Package size={18} /> Distinta di Carico Magazzino</h2>
-                     <pre className="font-mono text-xs whitespace-pre-wrap">{distinta.descrizioneDistinta}</pre>
-                  </div>
-                )}
-
-                <div className="mt-4">
-                   <h2 className="font-extrabold text-base mb-3 uppercase border-b border-black pb-1">Elenco Interventi Giornalieri</h2>
-                   <table className="w-full text-left text-xs border-collapse border border-black">
-                      <thead>
-                         <tr className="bg-gray-100 border-b border-black">
-                            <th className="p-2 border border-black w-24">Orario</th>
-                            <th className="p-2 border border-black w-48">Riferimento BI & Cliente</th>
-                            <th className="p-2 border border-black">Indirizzo & Località</th>
-                            <th className="p-2 border border-black">Attrezzature / Note</th>
-                         </tr>
-                      </thead>
-                      <tbody>
-                         {lavori.map((lav, idx) => (
-                            <tr key={idx} className="border-b border-black">
-                               <td className="p-2 border border-black font-mono font-bold align-top">{lav.oraInizio} - {lav.oraFine}</td>
-                               <td className="p-2 border border-black font-bold align-top">
-                                  {lav.nome}
-                                  <span className="block font-mono font-normal text-[10px] text-gray-600 mt-0.5">BI: {lav.numeroBi}</span>
-                               </td>
-                               <td className="p-2 border border-black align-top">{lav.indirizzo} {lav.localita ? `- ${lav.localita}` : ""}</td>
-                               <td className="p-2 border border-black align-top text-[11px]">
-                                  {lav.dettaglioAttrezzature && lav.dettaglioAttrezzature.length > 0 
-                                     ? lav.dettaglioAttrezzature.map((d: any) => `${d.descrizione}: ${d.quantita}`).join(", ") 
-                                     : "Verifica standard"}
-                               </td>
-                            </tr>
-                         ))}
-                      </tbody>
-                   </table>
-                </div>
-             </div>
-          )
-       })}
     </div>
-    </>
   );
 }
+```eof
