@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import dynamic from "next/dynamic";
-import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database, Car, Home as HomeIcon, AlertOctagon } from "lucide-react";
+import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database, Car, Home as HomeIcon, AlertOctagon, MessageSquare } from "lucide-react";
 
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLayer), { ssr: false });
@@ -260,10 +260,11 @@ export default function Home() {
   const [creazioneInCorso, setCreazioneInCorso] = useState<{[key:string]: boolean}>({});
   const [bulkSyncStatus, setBulkSyncStatus] = useState({ active: false, progress: 0, current: 0, total: 0 });
 
-  const [isChatOpen, setIsChatOpen] = useState(true);
+  // CHAT FLUTTUANTE: Di default la teniamo chiusa per dare spazio al Kanban
+  const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [messages, setMessages] = useState([
-    { sender: 'ai', text: 'Ciao! Sono il tuo assistente operativo. Carica il file Excel dei cantieri e dammi qualsiasi istruzione per pianificare o modificare la settimana.' }
+    { sender: 'ai', text: 'Ciao! Sono il tuo assistente operativo. Carica il file Excel e chiedimi di pianificare o spostare cantieri.' }
   ]);
   const [chatLoading, setChatLoading] = useState(false);
   
@@ -324,8 +325,10 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, chatLoading]);
+    if (isChatOpen) {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, chatLoading, isChatOpen]);
 
   useEffect(() => {
     const initGoogleClient = () => {
@@ -1504,8 +1507,8 @@ Tecnico: ${tecnicoNome}`;
   }
 
   return (
-    <div className="flex h-screen w-full bg-slate-100 text-slate-900 font-sans overflow-hidden print:h-auto print:overflow-visible print:bg-white">
-      <main className="flex-1 h-full overflow-y-auto custom-scrollbar p-6 md:p-10 print:p-0 print:overflow-visible relative">
+    <div className="flex h-screen w-full bg-slate-100 text-slate-900 font-sans overflow-hidden relative print:h-auto print:overflow-visible print:bg-white">
+      <main className="w-full h-full overflow-y-auto custom-scrollbar p-6 md:p-10 print:p-0 print:overflow-visible relative">
         <div className="w-full mx-auto">
           
           <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200 mb-8 gap-4 print:hidden">
@@ -1559,7 +1562,6 @@ Tecnico: ${tecnicoNome}`;
             </div>
           </header>
 
-          {/* RIEPILOGO PIANIFICAZIONE MOVED TO TOP */}
           <div className="w-full mb-8 print:hidden">
             <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
                <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2 mb-5"><CheckCircle size={18} className="text-emerald-600" /> Riepilogo Pianificazione</h3>
@@ -1631,145 +1633,140 @@ Tecnico: ${tecnicoNome}`;
             </div>
           </div>
 
-          {/* INTERFACCIA KANBAN DRAG & DROP */}
-          {interventiGrezzi.length > 0 && (
-            <div className={`mb-10 relative print:hidden ${inElaborazione ? 'opacity-50 pointer-events-none' : ''}`}>
-               
-               <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                   <div>
-                      <h2 className="text-xl font-extrabold text-slate-900 flex items-center gap-2"><GripVertical className="text-blue-600" /> Plancia Operativa Settimanale</h2>
-                      <p className="text-xs text-slate-500">Trascina le schede tra le colonne per affinare la programmazione. O rilascia una scheda su un'altra per posizionarla esattamente lì.</p>
-                   </div>
-                   <div className="flex gap-4">
-                       {bulkSyncStatus.active ? (
-                            <div className="bg-blue-50 border border-blue-200 px-4 py-2.5 rounded-xl flex items-center gap-3 text-xs font-bold text-blue-800">
-                                <Loader2 size={14} className="animate-spin"/> Sync a Calendar... {bulkSyncStatus.current} / {bulkSyncStatus.total}
-                            </div>
-                        ) : (
-                            <button onClick={inviaPianificazioneAGoogle} className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md text-xs transition-all">
-                                <UploadCloud size={16} /> Salva su Google Calendar ({globaleAssegnati.filter(i=>!i.syncedToGoogle).length})
-                            </button>
-                       )}
-                   </div>
-               </div>
-
-               {/* Layout separato per impedire l'accavallamento dei Sospesi con il Lunedì */}
-               <div className="flex items-start gap-4 pb-4 w-full">
-                   
-                   {/* COLONNA SOSPESI - STATICA A SINISTRA (NON PIU' STICKY) */}
-                   <div 
-                       className="min-w-[320px] max-w-[320px] h-[70vh] min-h-[500px] max-h-[800px] bg-slate-200 border-2 border-slate-300 rounded-3xl p-4 flex flex-col shrink-0 z-20 shadow-xl"
-                       onDragOver={handleDragOverKanban}
-                       onDrop={handleDropToSospesi}
-                   >
-                       <h3 className="font-extrabold text-slate-800 mb-4 flex justify-between items-center px-1">
-                           <span className="flex items-center gap-1.5"><PauseCircle size={16}/> SOSPESI</span>
-                           <span className="bg-slate-800 text-white px-2.5 py-0.5 rounded-full text-[10px] shadow-sm">{clientiInSospeso.length}</span>
-                       </h3>
-                       <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
-                           {clientiInSospeso.map(item => (
-                              <div 
-                                  key={item.codice} 
-                                  draggable={!(item.resoEstintori && item.giorniDallUltimoSos < 5)}
-                                  onDragStart={(e) => handleDragStartKanban(e, item.codice)}
-                                  onClick={() => !(item.resoEstintori && item.giorniDallUltimoSos < 5) && apriModaleSospeso(item)}
-                                  className={`bg-white border p-3 rounded-xl shadow-sm flex flex-col gap-1 transition-all ${(item.resoEstintori && item.giorniDallUltimoSos < 5) ? 'border-red-300 bg-red-50/40 opacity-70 cursor-not-allowed' : 'border-amber-200 hover:border-blue-400 hover:shadow-md cursor-grab active:cursor-grabbing relative'}`}
-                              >
-                                  <div className="flex justify-between items-start">
-                                      <span className="bg-amber-100 text-amber-900 font-mono text-[9px] px-2 py-0.5 rounded font-bold">BI: {item.numeroBi}</span>
-                                      <span className="text-[10px] text-slate-500 font-bold flex items-center gap-1"><Timer size={10} className="text-amber-600"/> {item.minutiLavoro}m</span>
-                                  </div>
-                                  <h4 className="font-bold text-slate-900 text-[11px] leading-tight mt-1 pr-6">{item.nome}</h4>
-                                  <p className="text-[10px] text-slate-500 truncate mt-0.5">{item.indirizzo}</p>
-                                  <button onClick={(e) => { e.stopPropagation(); setClienteSelezionatoScheda(item); }} className="absolute top-2 right-2 text-slate-400 hover:text-blue-600 bg-slate-50 p-1.5 rounded-lg transition-colors"><FileText size={12}/></button>
-                              </div>
-                           ))}
-                           {clientiInSospeso.length === 0 && <div className="text-center text-xs text-slate-400 mt-10 font-bold border-2 border-dashed border-slate-300 p-4 rounded-xl">Nessun sospeso. Trascina qui le schede da scartare.</div>}
+          <div className={`mb-10 relative print:hidden ${inElaborazione ? 'opacity-50 pointer-events-none' : ''}`}>
+               {interventiGrezzi.length > 0 && (
+                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                       <div>
+                          <h2 className="text-xl font-extrabold text-slate-900 flex items-center gap-2"><GripVertical className="text-blue-600" /> Plancia Operativa Settimanale</h2>
+                          <p className="text-xs text-slate-500">Trascina le schede tra le colonne per affinare la programmazione. O rilascia una scheda su un'altra per posizionarla esattamente lì.</p>
+                       </div>
+                       <div className="flex gap-4">
+                           {bulkSyncStatus.active ? (
+                                <div className="bg-blue-50 border border-blue-200 px-4 py-2.5 rounded-xl flex items-center gap-3 text-xs font-bold text-blue-800">
+                                    <Loader2 size={14} className="animate-spin"/> Sync a Calendar... {bulkSyncStatus.current} / {bulkSyncStatus.total}
+                                </div>
+                            ) : (
+                                <button onClick={inviaPianificazioneAGoogle} className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md text-xs transition-all">
+                                    <UploadCloud size={16} /> Salva su Google Calendar ({globaleAssegnati.filter(i=>!i.syncedToGoogle).length})
+                                </button>
+                           )}
                        </div>
                    </div>
+               )}
 
-                   {/* CONTENITORE GIORNI SCROLLABILE INDIPENDENTE */}
-                   <div className="flex overflow-x-auto items-start gap-4 pb-4 w-full snap-x custom-scrollbar h-[70vh] min-h-[500px] max-h-[800px]">
-                       {giornateStats.map(g => {
-                           const taskGiorno = interventiGrezzi.filter(i => i.selezionatoPerGiro && i.dataAssegnata === g.dataStr);
-                           const isOvertime = g.orarioFineMinuti > 1080; // > 18:00
-                           const hh = String(Math.floor(g.orarioFineMinuti / 60)).padStart(2, '0');
-                           const mm = String(Math.floor(g.orarioFineMinuti % 60)).padStart(2, '0');
+               {interventiGrezzi.length > 0 && (
+                   <div className="flex items-start gap-4 pb-4 w-full">
+                       <div 
+                           className="min-w-[320px] max-w-[320px] h-[70vh] min-h-[500px] max-h-[800px] bg-slate-200 border-2 border-slate-300 rounded-3xl p-4 flex flex-col shrink-0 z-20 shadow-xl"
+                           onDragOver={handleDragOverKanban}
+                           onDrop={handleDropToSospesi}
+                       >
+                           <h3 className="font-extrabold text-slate-800 mb-4 flex justify-between items-center px-1">
+                               <span className="flex items-center gap-1.5"><PauseCircle size={16}/> SOSPESI</span>
+                               <span className="bg-slate-800 text-white px-2.5 py-0.5 rounded-full text-[10px] shadow-sm">{clientiInSospeso.length}</span>
+                           </h3>
+                           <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+                               {clientiInSospeso.map(item => (
+                                  <div 
+                                      key={item.codice} 
+                                      draggable={!(item.resoEstintori && item.giorniDallUltimoSos < 5)}
+                                      onDragStart={(e) => handleDragStartKanban(e, item.codice)}
+                                      onClick={() => !(item.resoEstintori && item.giorniDallUltimoSos < 5) && apriModaleSospeso(item)}
+                                      className={`bg-white border p-3 rounded-xl shadow-sm flex flex-col gap-1 transition-all ${(item.resoEstintori && item.giorniDallUltimoSos < 5) ? 'border-red-300 bg-red-50/40 opacity-70 cursor-not-allowed' : 'border-amber-200 hover:border-blue-400 hover:shadow-md cursor-grab active:cursor-grabbing relative'}`}
+                                  >
+                                      <div className="flex justify-between items-start">
+                                          <span className="bg-amber-100 text-amber-900 font-mono text-[9px] px-2 py-0.5 rounded font-bold">BI: {item.numeroBi}</span>
+                                          <span className="text-[10px] text-slate-500 font-bold flex items-center gap-1"><Timer size={10} className="text-amber-600"/> {item.minutiLavoro}m</span>
+                                      </div>
+                                      <h4 className="font-bold text-slate-900 text-[11px] leading-tight mt-1 pr-6">{item.nome}</h4>
+                                      <p className="text-[10px] text-slate-500 truncate mt-0.5">{item.indirizzo}</p>
+                                      <button onClick={(e) => { e.stopPropagation(); setClienteSelezionatoScheda(item); }} className="absolute top-2 right-2 text-slate-400 hover:text-blue-600 bg-slate-50 p-1.5 rounded-lg transition-colors"><FileText size={12}/></button>
+                                  </div>
+                               ))}
+                               {clientiInSospeso.length === 0 && <div className="text-center text-xs text-slate-400 mt-10 font-bold border-2 border-dashed border-slate-300 p-4 rounded-xl">Nessun sospeso. Trascina qui le schede da scartare.</div>}
+                           </div>
+                       </div>
 
-                           return (
-                             <div 
-                                 key={g.dataStr}
-                                 className={`min-w-[340px] max-w-[340px] h-full bg-slate-50 border-2 rounded-3xl p-4 flex flex-col snap-start shrink-0 transition-all ${isOvertime ? 'border-red-400 shadow-[0_0_20px_rgba(239,68,68,0.15)] bg-red-50/50' : 'border-slate-200 shadow-sm'}`}
-                                 onDragOver={handleDragOverKanban}
-                                 onDrop={(e) => handleDropToDay(e, g.dataStr)}
-                             >
-                                 <div className="mb-4 pb-4 border-b border-slate-200 px-1">
-                                     <div className="flex justify-between items-start mb-2">
-                                         <h3 className="font-extrabold text-slate-900 text-lg uppercase tracking-tight">{g.nomeGiorno}</h3>
-                                         <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-1 rounded-lg">{formattaDataVisuale(g.dataStr)}</span>
+                       <div className="flex overflow-x-auto items-start gap-4 pb-4 w-full snap-x custom-scrollbar h-[70vh] min-h-[500px] max-h-[800px]">
+                           {giornateStats.map(g => {
+                               const taskGiorno = interventiGrezzi.filter(i => i.selezionatoPerGiro && i.dataAssegnata === g.dataStr);
+                               const isOvertime = g.orarioFineMinuti > 1080; // > 18:00
+                               const hh = String(Math.floor(g.orarioFineMinuti / 60)).padStart(2, '0');
+                               const mm = String(Math.floor(g.orarioFineMinuti % 60)).padStart(2, '0');
+
+                               return (
+                                 <div 
+                                     key={g.dataStr}
+                                     className={`min-w-[340px] max-w-[340px] h-full bg-slate-50 border-2 rounded-3xl p-4 flex flex-col snap-start shrink-0 transition-all ${isOvertime ? 'border-red-400 shadow-[0_0_20px_rgba(239,68,68,0.15)] bg-red-50/50' : 'border-slate-200 shadow-sm'}`}
+                                     onDragOver={handleDragOverKanban}
+                                     onDrop={(e) => handleDropToDay(e, g.dataStr)}
+                                 >
+                                     <div className="mb-4 pb-4 border-b border-slate-200 px-1">
+                                         <div className="flex justify-between items-start mb-2">
+                                             <h3 className="font-extrabold text-slate-900 text-lg uppercase tracking-tight">{g.nomeGiorno}</h3>
+                                             <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-1 rounded-lg">{formattaDataVisuale(g.dataStr)}</span>
+                                         </div>
+                                         
+                                         {isOvertime ? (
+                                             <div className="bg-red-100 text-red-800 text-[11px] font-bold px-2.5 py-1.5 rounded-lg flex items-center justify-between shadow-sm">
+                                                 <span className="flex items-center gap-1.5"><AlertOctagon size={14}/> OVERTIME TURNO:</span>
+                                                 <span className="text-sm">{hh}:{mm}</span>
+                                             </div>
+                                         ) : (
+                                             <div className="bg-emerald-100 text-emerald-800 text-[11px] font-bold px-2.5 py-1.5 rounded-lg flex items-center justify-between shadow-sm">
+                                                 <span className="flex items-center gap-1.5"><CheckCircle size={14}/> Fine turno stimata:</span>
+                                                 <span className="text-sm">{hh}:{mm}</span>
+                                             </div>
+                                         )}
                                      </div>
                                      
-                                     {isOvertime ? (
-                                         <div className="bg-red-100 text-red-800 text-[11px] font-bold px-2.5 py-1.5 rounded-lg flex items-center justify-between shadow-sm">
-                                             <span className="flex items-center gap-1.5"><AlertOctagon size={14}/> OVERTIME TURNO:</span>
-                                             <span className="text-sm">{hh}:{mm}</span>
-                                         </div>
-                                     ) : (
-                                         <div className="bg-emerald-100 text-emerald-800 text-[11px] font-bold px-2.5 py-1.5 rounded-lg flex items-center justify-between shadow-sm">
-                                             <span className="flex items-center gap-1.5"><CheckCircle size={14}/> Fine turno stimata:</span>
-                                             <span className="text-sm">{hh}:{mm}</span>
-                                         </div>
-                                     )}
-                                 </div>
-                                 
-                                 <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
-                                     {taskGiorno.length === 0 && <div className="text-center text-xs text-slate-400 mt-10 font-bold border-2 border-dashed border-slate-200 p-4 rounded-xl">Giorno vuoto. Trascina qui le schede.</div>}
-                                     {taskGiorno.map(item => (
-                                        <div 
-                                            key={item.codice}
-                                            draggable={!item.isPregresso && !item.isDistinta}
-                                            onDragStart={(e) => handleDragStartKanban(e, item.codice)}
-                                            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverCard(item.codice); }}
-                                            onDragLeave={() => setDragOverCard(null)}
-                                            onDrop={(e) => handleDropToDay(e, g.dataStr, item.codice)}
-                                            className={`p-3 rounded-xl border bg-white shadow-sm text-left relative transition-all
-                                                ${dragOverCard === item.codice ? 'border-t-4 border-t-blue-500 mt-2' : ''}
-                                                ${item.isPregresso ? 'border-indigo-200 bg-indigo-50/50 cursor-not-allowed' : item.isDistinta ? 'border-orange-200 bg-orange-50/50 cursor-default' : 'border-slate-200 hover:border-blue-400 cursor-grab active:cursor-grabbing'}
-                                            `}
-                                        >
-                                           <div className="flex justify-between items-start mb-1.5">
-                                              {item.isDistinta ? (
-                                                <span className="bg-orange-100 text-orange-800 text-[9px] font-extrabold px-2 py-0.5 rounded-md flex items-center gap-1"><Package size={10}/> MAGAZZINO</span>
-                                              ) : item.isPregresso ? (
-                                                <span className="bg-indigo-100 text-indigo-800 text-[9px] font-extrabold px-2 py-0.5 rounded-md flex items-center gap-1"><CalendarPlus size={10}/> PREGRESSO</span>
-                                              ) : (
-                                                <span className="bg-slate-100 text-slate-700 text-[9px] font-mono font-bold px-2 py-0.5 rounded-md border border-slate-200">BI: {item.numeroBi}</span>
-                                              )}
-                                              {!item.isDistinta && (
-                                                  <span className="text-[10px] font-mono font-bold text-slate-600 flex items-center gap-1"><Clock size={10}/> {item.oraInizio}-{item.oraFine}</span>
-                                              )}
-                                           </div>
-                                           <p className={`font-bold text-[11px] leading-tight mt-1 pr-6 ${item.isDistinta ? 'text-orange-900' : 'text-slate-900'}`}>{item.nome}</p>
-                                           <div className="flex justify-between items-end mt-2">
-                                               <p className="text-[9px] text-slate-500 font-medium truncate w-[70%]"><MapPin size={10} className="inline mr-0.5"/>{item.localita || item.indirizzo}</p>
-                                               <div className="flex items-center gap-1.5">
-                                                  {item.resoEstintori && <span className="text-amber-600" title="SOS"><AlertTriangle size={12}/></span>}
-                                                  {!item.isPregresso && !item.isDistinta && <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded text-[9px] font-bold border border-emerald-100">{item.minutiLavoro}m</span>}
+                                     <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+                                         {taskGiorno.length === 0 && <div className="text-center text-xs text-slate-400 mt-10 font-bold border-2 border-dashed border-slate-200 p-4 rounded-xl">Giorno vuoto. Trascina qui le schede.</div>}
+                                         {taskGiorno.map(item => (
+                                            <div 
+                                                key={item.codice}
+                                                draggable={!item.isPregresso && !item.isDistinta}
+                                                onDragStart={(e) => handleDragStartKanban(e, item.codice)}
+                                                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverCard(item.codice); }}
+                                                onDragLeave={() => setDragOverCard(null)}
+                                                onDrop={(e) => handleDropToDay(e, g.dataStr, item.codice)}
+                                                className={`p-3 rounded-xl border bg-white shadow-sm text-left relative transition-all
+                                                    ${dragOverCard === item.codice ? 'border-t-4 border-t-blue-500 mt-2' : ''}
+                                                    ${item.isPregresso ? 'border-indigo-200 bg-indigo-50/50 cursor-not-allowed' : item.isDistinta ? 'border-orange-200 bg-orange-50/50 cursor-default' : 'border-slate-200 hover:border-blue-400 cursor-grab active:cursor-grabbing'}
+                                                `}
+                                            >
+                                               <div className="flex justify-between items-start mb-1.5">
+                                                  {item.isDistinta ? (
+                                                    <span className="bg-orange-100 text-orange-800 text-[9px] font-extrabold px-2 py-0.5 rounded-md flex items-center gap-1"><Package size={10}/> MAGAZZINO</span>
+                                                  ) : item.isPregresso ? (
+                                                    <span className="bg-indigo-100 text-indigo-800 text-[9px] font-extrabold px-2 py-0.5 rounded-md flex items-center gap-1"><CalendarPlus size={10}/> PREGRESSO</span>
+                                                  ) : (
+                                                    <span className="bg-slate-100 text-slate-700 text-[9px] font-mono font-bold px-2 py-0.5 rounded-md border border-slate-200">BI: {item.numeroBi}</span>
+                                                  )}
+                                                  {!item.isDistinta && (
+                                                      <span className="text-[10px] font-mono font-bold text-slate-600 flex items-center gap-1"><Clock size={10}/> {item.oraInizio}-{item.oraFine}</span>
+                                                  )}
                                                </div>
-                                           </div>
-                                           <button onClick={() => setClienteSelezionatoScheda(item)} className="absolute top-2 right-2 text-slate-400 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 p-1.5 rounded-lg transition-colors"><FileText size={12}/></button>
-                                        </div>
-                                     ))}
+                                               <p className={`font-bold text-[11px] leading-tight mt-1 pr-6 ${item.isDistinta ? 'text-orange-900' : 'text-slate-900'}`}>{item.nome}</p>
+                                               <div className="flex justify-between items-end mt-2">
+                                                   <p className="text-[9px] text-slate-500 font-medium truncate w-[70%]"><MapPin size={10} className="inline mr-0.5"/>{item.localita || item.indirizzo}</p>
+                                                   <div className="flex items-center gap-1.5">
+                                                      {item.resoEstintori && <span className="text-amber-600" title="SOS"><AlertTriangle size={12}/></span>}
+                                                      {!item.isPregresso && !item.isDistinta && <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded text-[9px] font-bold border border-emerald-100">{item.minutiLavoro}m</span>}
+                                                   </div>
+                                               </div>
+                                               <button onClick={() => setClienteSelezionatoScheda(item)} className="absolute top-2 right-2 text-slate-400 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 p-1.5 rounded-lg transition-colors"><FileText size={12}/></button>
+                                            </div>
+                                         ))}
+                                     </div>
                                  </div>
-                             </div>
-                           )
-                       })}
+                               )
+                           })}
+                       </div>
                    </div>
-               </div>
-            </div>
-          )}
+               )}
+          </div>
 
-          {/* MAPPA IN BASSO CON FILTRI ACCORPATI */}
           {interventiGrezzi.length > 0 && leafletLoaded && (
             <div className="w-full flex flex-col gap-6 mb-8 print:hidden">
               <div className={`bg-white p-6 rounded-2xl shadow-sm border border-slate-200 ${inElaborazione ? 'opacity-50 pointer-events-none' : ''}`}>
@@ -1822,7 +1819,6 @@ Tecnico: ${tecnicoNome}`;
             </div>
           )}
 
-          {/* MODALI IN Z-INDEX MASSIMO Z-[9999] */}
           {sospesoInModifica && (
             <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[9999] flex items-center justify-center p-4">
               <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-8 relative border border-slate-200">
@@ -1933,7 +1929,6 @@ Tecnico: ${tecnicoNome}`;
             </div>
           )}
 
-          {/* VISTA STAMPA (INCLUSA NEL MAIN PER FUNZIONARE CON IL FLEX LAYOUT) */}
           <div className="hidden print:block w-full text-black bg-white font-sans text-sm">
              {giorniVisibiliPerStampa.map((dataStr) => {
                 const interventiGiorno = interventiVisibiliArr.filter(i => i.dataAssegnata === dataStr && (i.selezionatoPerGiro || i.isPregresso));
@@ -2001,60 +1996,85 @@ Tecnico: ${tecnicoNome}`;
         </div>
       </main>
 
-      {/* CHAT FISSA A DESTRA PER RISOLVERE IL BUG DI IMPAGINAZIONE */}
-      {isChatOpen && (
-        <aside className="w-[400px] h-full bg-white border-l border-slate-200 flex flex-col shadow-2xl shrink-0 print:hidden z-50">
-          <div className="p-4 bg-gradient-to-r from-slate-900 to-slate-800 text-white flex justify-between items-center shadow-md">
-            <div className="flex items-center gap-2.5">
-              <span className="p-2 bg-amber-500 text-white rounded-xl shadow"><Zap size={16} /></span>
-              <div>
-                <h3 className="font-extrabold text-sm tracking-wide">Assistente Operativo IA</h3>
-                <p className="text-[10px] text-slate-300">Pronto a modificare la pianificazione</p>
-              </div>
+      {/* PULSANTE FLUTTUANTE PER APRIRE LA CHAT IA */}
+      <button
+        onClick={() => setIsChatOpen(!isChatOpen)}
+        className={`fixed bottom-8 right-8 z-[100] w-16 h-16 rounded-full shadow-[0_10px_40px_rgba(37,99,235,0.4)] flex items-center justify-center transition-all duration-300 hover:scale-105 print:hidden ${
+          isChatOpen ? 'bg-slate-800 text-white hover:bg-slate-700 shadow-slate-500/30' : 'bg-gradient-to-br from-blue-600 to-blue-700 text-white'
+        }`}
+      >
+        {isChatOpen ? <X size={28} /> : (
+           <div className="relative flex items-center justify-center">
+              <MessageSquare size={26} className={chatLoading ? 'animate-pulse' : ''} />
+              {!isChatOpen && messages.length > 1 && (
+                 <span className="absolute -top-1 -right-2 bg-red-500 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm">
+                    {messages.length - 1}
+                 </span>
+              )}
+           </div>
+        )}
+      </button>
+
+      {/* FINESTRA CHAT FLUTTUANTE */}
+      <div 
+        className={`fixed bottom-28 right-8 z-[90] w-[380px] h-[600px] max-h-[75vh] bg-white rounded-3xl shadow-[0_20px_60px_-15px_rgba(0,0,0,0.2)] border border-slate-200 flex flex-col overflow-hidden transition-all duration-300 origin-bottom-right print:hidden ${
+          isChatOpen ? 'scale-100 opacity-100 translate-y-0' : 'scale-95 opacity-0 translate-y-8 pointer-events-none'
+        }`}
+      >
+        <div className="p-4 bg-gradient-to-r from-slate-900 to-slate-800 text-white flex justify-between items-center shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-500/20 rounded-xl backdrop-blur-sm border border-blue-400/30">
+               <Zap size={18} className="text-blue-300" />
+            </div>
+            <div>
+              <h3 className="font-extrabold text-sm tracking-wide">Assistente IA</h3>
+              <p className="text-[10px] text-slate-300 font-medium">Operativo e in ascolto</p>
             </div>
           </div>
+          <button onClick={() => setIsChatOpen(false)} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-full transition-colors">
+             <X size={18} />
+          </button>
+        </div>
 
-          <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50/70 custom-scrollbar">
-            {messages.map((msg, idx) => (
-              <div key={idx} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-xs leading-relaxed shadow-sm ${
-                  msg.sender === 'user' 
-                    ? 'bg-blue-600 text-white rounded-br-xs font-medium' 
-                    : 'bg-white text-slate-800 border border-slate-200/80 rounded-bl-xs'
-                }`}>
-                  {msg.text}
-                </div>
+        <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50/70 custom-scrollbar">
+          {messages.map((msg, idx) => (
+            <div key={idx} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[85%] px-4 py-3 text-[13px] leading-relaxed shadow-sm ${
+                msg.sender === 'user' 
+                  ? 'bg-blue-600 text-white rounded-2xl rounded-br-sm font-medium' 
+                  : 'bg-white text-slate-700 border border-slate-200/80 rounded-2xl rounded-bl-sm font-medium'
+              }`}>
+                {msg.text}
               </div>
-            ))}
-            {chatLoading && (
-              <div className="flex justify-start">
-                <div className="bg-white text-slate-500 border border-slate-200 px-4 py-3 rounded-2xl rounded-bl-xs text-xs shadow-sm flex items-center gap-2.5">
-                  <Loader2 size={14} className="animate-spin text-blue-600" /> Sto elaborando le modifiche...
-                </div>
+            </div>
+          ))}
+          {chatLoading && (
+            <div className="flex justify-start">
+              <div className="bg-white text-slate-500 border border-slate-200 px-4 py-3 rounded-2xl rounded-bl-sm text-[13px] shadow-sm flex items-center gap-2.5">
+                <Loader2 size={14} className="animate-spin text-blue-600" /> Sto elaborando le modifiche...
               </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
 
-          <form onSubmit={handleSendMessage} className="p-4 bg-white border-t border-slate-200 flex gap-2 items-center">
-            <input 
-              type="text"
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              placeholder="Es. Sposta Kalmar a mercoledì..."
-              className="flex-1 bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition"
-            />
-            <button 
-              type="submit"
-              disabled={chatLoading}
-              className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-xl text-xs font-bold transition shadow-md disabled:opacity-50 shrink-0"
-            >
-              Invia
-            </button>
-          </form>
-        </aside>
-      )}
+        <form onSubmit={handleSendMessage} className="p-4 bg-white border-t border-slate-100 flex gap-2 items-center shrink-0">
+          <input 
+            type="text"
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            placeholder="Es. Sposta Kalmar a mercoledì..."
+            className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-[13px] font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:bg-white transition-all shadow-inner"
+          />
+          <button 
+            type="submit"
+            disabled={chatLoading}
+            className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-2xl text-[13px] font-bold transition-all shadow-md disabled:opacity-50 shrink-0"
+          >
+            Invia
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
-```eof
