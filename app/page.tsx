@@ -260,7 +260,7 @@ export default function Home() {
   const [creazioneInCorso, setCreazioneInCorso] = useState<{[key:string]: boolean}>({});
   const [bulkSyncStatus, setBulkSyncStatus] = useState({ active: false, progress: 0, current: 0, total: 0 });
 
-  // CHAT FLUTTUANTE: Di default la teniamo chiusa per dare spazio al Kanban
+  // CHAT FLUTTUANTE
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [messages, setMessages] = useState([
@@ -1554,11 +1554,20 @@ Tecnico: ${tecnicoNome}`;
                   </a>
               </div>
               
-              <label className={`w-full py-2.5 rounded-xl font-bold text-xs shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${Object.keys(rubricaClienti).length > 0 ? 'bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-300'}`}>
-                <Book size={16} />
-                {Object.keys(rubricaClienti).length > 0 ? `Aggiorna Rubrica Clienti (${Object.keys(rubricaClienti).length} salvati)` : "Inserisci Rubrica Clienti"}
-                <input type="file" accept=".xlsx, .xls, .csv, .txt" className="hidden" onChange={handleRubricaUpload} />
-              </label>
+              {/* BOTTONI AFFIANCATI PER RUBRICA E INSOLUTI */}
+              <div className="flex gap-2 w-full">
+                  <label className={`flex-1 py-2.5 rounded-xl font-bold text-[11px] shadow-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer ${Object.keys(rubricaClienti).length > 0 ? 'bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-300'}`}>
+                    <Book size={14} />
+                    {Object.keys(rubricaClienti).length > 0 ? `Rubrica (${Object.keys(rubricaClienti).length})` : "Carica Rubrica"}
+                    <input type="file" accept=".xlsx, .xls, .csv, .txt" className="hidden" onChange={handleRubricaUpload} />
+                  </label>
+                  
+                  <label className="flex-1 py-2.5 rounded-xl font-bold text-[11px] shadow-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer bg-red-50 text-red-700 hover:bg-red-100 border border-red-200">
+                    <Banknote size={14} />
+                    Lista Insoluti
+                    <input type="file" accept=".xlsx, .xls, .csv" className="hidden" onChange={handleInsolutiUpload} />
+                  </label>
+              </div>
             </div>
           </header>
 
@@ -1767,6 +1776,7 @@ Tecnico: ${tecnicoNome}`;
                )}
           </div>
 
+          {/* MAPPA IN BASSO CON FILTRI ACCORPATI */}
           {interventiGrezzi.length > 0 && leafletLoaded && (
             <div className="w-full flex flex-col gap-6 mb-8 print:hidden">
               <div className={`bg-white p-6 rounded-2xl shadow-sm border border-slate-200 ${inElaborazione ? 'opacity-50 pointer-events-none' : ''}`}>
@@ -1819,6 +1829,7 @@ Tecnico: ${tecnicoNome}`;
             </div>
           )}
 
+          {/* MODALI IN Z-INDEX MASSIMO Z-[9999] */}
           {sospesoInModifica && (
             <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[9999] flex items-center justify-center p-4">
               <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-8 relative border border-slate-200">
