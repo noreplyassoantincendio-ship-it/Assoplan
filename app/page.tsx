@@ -156,7 +156,6 @@ const calcolaDistanzaKm = (lat1: number, lon1: number, lat2: number, lon2: numbe
 let googleMapsPromise: Promise<void> | null = null;
 const loadGoogleMapsAPI = () => {
     if (googleMapsPromise) return googleMapsPromise;
-    // @ts-ignore
     if (typeof window !== "undefined" && window.google && window.google.maps) {
         googleMapsPromise = Promise.resolve();
         return googleMapsPromise;
@@ -186,18 +185,14 @@ const calcolaTempoDistanzaGoogle = async (lat1: number, lon1: number, lat2: numb
 
     try {
         await loadGoogleMapsAPI();
-        // @ts-ignore
         const service = new window.google.maps.DistanceMatrixService();
-        // @ts-ignore
         const origin = new window.google.maps.LatLng(lat1, lon1);
-        // @ts-ignore
         const destination = new window.google.maps.LatLng(lat2, lon2);
         
         const response: any = await new Promise((resolve, reject) => {
             service.getDistanceMatrix({
                 origins: [origin],
                 destinations: [destination],
-                // @ts-ignore
                 travelMode: window.google.maps.TravelMode.DRIVING,
             }, (res: any, status: any) => {
                 if (status === "OK") resolve(res);
@@ -230,7 +225,10 @@ export default function Home() {
   const [interventiGrezzi, setInterventiGrezzi] = useState<any[]>([]);
   const [clientiInSospeso, setClientiInSospeso] = useState<any[]>([]);
   const [clientiGiaCalendarizzati, setClientiGiaCalendarizzati] = useState<any[]>([]);
+  
+  // STATO PER LA BARRA DI PROGRESSIONE IA
   const [inElaborazione, setInElaborazione] = useState(false);
+  const [progressIA, setProgressIA] = useState({ active: false, percent: 0, text: "" });
   
   const [leafletLoaded, setLeafletLoaded] = useState(false);
   const leafletRef = useRef<any>(null);
@@ -260,7 +258,6 @@ export default function Home() {
   const [creazioneInCorso, setCreazioneInCorso] = useState<{[key:string]: boolean}>({});
   const [bulkSyncStatus, setBulkSyncStatus] = useState({ active: false, progress: 0, current: 0, total: 0 });
 
-  // CHAT FLUTTUANTE
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [messages, setMessages] = useState([
@@ -301,7 +298,6 @@ export default function Home() {
   useEffect(() => {
     import("leaflet").then((L) => {
       leafletRef.current = L;
-      // @ts-ignore
       delete L.Icon.Default.prototype._getIconUrl;
       L.Icon.Default.mergeOptions({
         iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
@@ -332,9 +328,7 @@ export default function Home() {
 
   useEffect(() => {
     const initGoogleClient = () => {
-      // @ts-ignore
       if (window.google && window.google.accounts) {
-        // @ts-ignore
         tokenClientRef.current = window.google.accounts.oauth2.initTokenClient({
           client_id: GOOGLE_CLIENT_ID, scope: GOOGLE_SCOPES,
           callback: (response: any) => {
@@ -348,7 +342,6 @@ export default function Home() {
         setIsCheckingAuth(false);
       }
     };
-    // @ts-ignore
     if (window.google) initGoogleClient();
     else {
       const script = document.createElement("script");
@@ -724,12 +717,17 @@ Tecnico: ${tecnicoNome}`;
     if (righe.length === 0) { alert("Nessun dato caricato. Seleziona prima un file."); return; }
 
     setInElaborazione(true);
+    setProgressIA({ active: true, percent: 5, text: "Avvio elaborazione e lettura dati Excel..." });
+
     const clientiMappa = new Map();
     
+    setProgressIA({ active: true, percent: 15, text: "Sincronizzazione impegni Calendar in corso..." });
     const impegniEsistenti = await fetchEventiRealiCalendar(tecnicoSelezionato.email, googleToken);
+    
     let tuttiIBiGiaInCalendario: string[] = [];
     impegniEsistenti.forEach(evt => { tuttiIBiGiaInCalendario = [...tuttiIBiGiaInCalendario, ...evt.numeriBiRilevati]; });
 
+    setProgressIA({ active: true, percent: 30, text: "Analisi foglio Excel e anagrafiche Rubrica..." });
     for (const riga of righe) {
       const nomeCliente = (riga.desclifor || "").toUpperCase();
       if (!nomeCliente) continue;
@@ -778,6 +776,7 @@ Tecnico: ${tecnicoNome}`;
       cliente._maxMt.rv = Math.max(cliente._maxMt.rv, Number(riga.eo_rv || riga.EO_RV) || 0);
     }
 
+    setProgressIA({ active: true, percent: 45, text: "Calcolo Geografico (Google Maps API)..." });
     for (const cliente of Array.from(clientiMappa.values())) {
         if (cliente.resoEstintori) {
             let veriMuletti = cliente._maxMt.rv || 0;
@@ -965,6 +964,18 @@ Tecnico: ${tecnicoNome}`;
     let unassigned = [...clientiDaPianificare];
     const clientiPianificati = [];
 
+    setProgressIA({ active: true, percent: 55, text: "Connessione all'Agente IA..." });
+
+    // Simulazione Avanzamento durante la chiamata IA
+    let simInterval = setInterval(() => {
+        setProgressIA(prev => {
+            if (prev.percent < 90) {
+                return { ...prev, percent: prev.percent + 1, text: "Ragionamento IA in corso (incrocio vincoli e distanze)..." };
+            }
+            return prev;
+        });
+    }, 1000);
+
     try {
         const payload = {
             interventi: unassigned.map(c => ({
@@ -998,6 +1009,9 @@ Tecnico: ${tecnicoNome}`;
             })
         });
         
+        clearInterval(simInterval);
+        setProgressIA({ active: true, percent: 92, text: "Applicazione rotte e calcolo tempistiche..." });
+
         const iaResult = await res.json();
         
         if (iaResult.success && iaResult.piano) {
@@ -1021,6 +1035,7 @@ Tecnico: ${tecnicoNome}`;
             throw new Error(iaResult.error || "L'Agente IA non ha restituito un piano valido");
         }
     } catch (e: any) {
+        clearInterval(simInterval);
         console.error("Dettaglio errore IA:", e);
         if (typeof window !== 'undefined') {
             window.alert(`Errore IA: ${e.message || "Errore sconosciuto"}. I cantieri sono stati inseriti nei Sospesi.`);
@@ -1029,6 +1044,8 @@ Tecnico: ${tecnicoNome}`;
             clientiSospesiTmp.push({ ...c, motivoSospeso: `Errore: ${e.message || "Sconosciuto"}`, selezionatoPerGiro: false, dataAssegnata: null });
         });
     }
+
+    setProgressIA({ active: true, percent: 98, text: "Finalizzazione plancia logistica..." });
 
     const datiCombinati = [...eventiPregressiUI, ...clientiPianificati].sort((a, b) => {
         if (a.dataAssegnata !== b.dataAssegnata) return a.dataAssegnata.localeCompare(b.dataAssegnata);
@@ -1043,6 +1060,8 @@ Tecnico: ${tecnicoNome}`;
     setGiornateStats(resRic.statsAggiornate);
     setClientiInSospeso(clientiSospesiTmp); 
     setClientiGiaCalendarizzati(clientiScartatiTmp);
+    
+    setProgressIA({ active: false, percent: 100, text: "Completato!" });
     setInElaborazione(false);
   };
 
@@ -1162,6 +1181,14 @@ Tecnico: ${tecnicoNome}`;
     setMessages(updatedMessages);
     setChatInput('');
     setChatLoading(true);
+    setProgressIA({ active: true, percent: 10, text: "Analisi della richiesta in chat..." });
+
+    let simInterval = setInterval(() => {
+        setProgressIA(prev => {
+            if (prev.percent < 90) return { ...prev, percent: prev.percent + 1, text: "Rielaborazione piano IA in corso..." };
+            return prev;
+        });
+    }, 800);
 
     try {
       const res = await fetch('/api/planner', {
@@ -1180,6 +1207,9 @@ Tecnico: ${tecnicoNome}`;
           }))
         })
       });
+
+      clearInterval(simInterval);
+      setProgressIA({ active: true, percent: 95, text: "Applicazione modifiche alla plancia..." });
 
       const data = await res.json();
       if (data.success) {
@@ -1244,8 +1274,10 @@ Tecnico: ${tecnicoNome}`;
         setMessages(prev => [...prev, { sender: 'ai', text: 'Non sono riuscito ad applicare la modifica. Riprova.' }]);
       }
     } catch (err) {
+      clearInterval(simInterval);
       setMessages(prev => [...prev, { sender: 'ai', text: 'Errore di connessione con il server.' }]);
     } finally {
+      setProgressIA({ active: false, percent: 100, text: "Fatto!" });
       setChatLoading(false);
     }
   };
@@ -1510,6 +1542,20 @@ Tecnico: ${tecnicoNome}`;
 
   return (
     <div className="flex h-screen w-full bg-slate-100 text-slate-900 font-sans overflow-hidden relative print:h-auto print:overflow-visible print:bg-white">
+      
+      {/* 🚀 OVERLAY BARRA DI PROGRESSIONE IA */}
+      {progressIA.active && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] bg-white rounded-2xl shadow-2xl border border-blue-200 p-4 w-[90%] max-w-md flex flex-col gap-3">
+           <div className="flex justify-between items-center">
+              <span className="text-xs font-bold text-slate-700 flex items-center gap-2"><Loader2 size={14} className="animate-spin text-blue-600"/> {progressIA.text}</span>
+              <span className="text-xs font-extrabold text-blue-700">{progressIA.percent}%</span>
+           </div>
+           <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+              <div className="bg-blue-600 h-full rounded-full transition-all duration-500 ease-out" style={{ width: `${progressIA.percent}%` }}></div>
+           </div>
+        </div>
+      )}
+
       <main className="w-full h-full overflow-y-auto custom-scrollbar p-6 md:p-10 print:p-0 print:overflow-visible relative">
         <div className="w-full mx-auto">
           
