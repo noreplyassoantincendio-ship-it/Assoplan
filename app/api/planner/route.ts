@@ -29,13 +29,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "API Key mancante nel file .env.local" }, { status: 500 });
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-3.8-flash" });
+    // TEMP 0.1: Obbliga il modello a essere deterministico, logico, freddo e calcolatore. Niente "creatività".
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-1.5-flash",
+      generationConfig: { temperature: 0.1 }
+    });
 
     let historyTestuale = "";
     if (history && history.length > 0) {
       historyTestuale = "--- CRONOLOGIA DELLA CHAT FINORA (Usa queste info per applicare regole e preferenze dell'utente nel tempo) ---\n";
       history.forEach((msg: any) => {
-        historyTestuale += `${msg.role === 'user' ? 'UTENTE' : 'ASSISTENTE'}:${msg.text}\n`;
+        historyTestuale += `${msg.role === 'user' ? 'UTENTE' : 'ASSISTENTE'}: ${msg.text}\n`;
       });
       historyTestuale += "-------------------------------------------------------------\n\n";
     }
@@ -45,49 +49,44 @@ export async function POST(request: Request) {
 LE TAVOLE DELLA LEGGE DI ASSO ANTINCENDIO (REGOLE DA RISPETTARE SEMPRE):
 
 0. OBBEDIENZA ASSOLUTA IN CHAT:
-    - Sei uno strumento esecutivo. Devi ubbidire TASSATIVAMENTE agli ordini dell'utente in chat.
-    - Se l'utente ti chiede esplicitamente di spostare, assegnare o forzare un cantiere in un giorno specifico, ESEGUILO IMMEDIATAMENTE, ignorando in quell'occasione i limiti di orario, i colli di bottiglia o la logica geografica. L'utente ha sempre l'ultima parola.
-    - La regole inserite sono legge non puoi ignorarle e fare di testa tua. 
+    - Sei uno strumento esecutivo. Devi ubbidire TASSATIVAMENTE agli ordini dell'utente.
+    - Se l'utente ti chiede esplicitamente di spostare, assegnare o forzare un cantiere in un giorno specifico, ESEGUILO IMMEDIATAMENTE, ignorando limiti di orario o di logica geografica. L'utente ha sempre l'ultima parola.
 
 1. LOGICA "A GOCCIA" E VICINANZA GEOGRAFICA:
-   - È assolutamente VIETATO far fare "salti qua e là" (ping-pong) al tecnico (es. Nervi -> Centro -> Voltri). Usa SEMPRE la logica della massima vicinanza tra i clienti.
-   - Quando si coprono zone fuori città o fuori provincia, il giro DEVE iniziare dal cliente più lontano al mattino, per poi inserire i clienti man mano più vicini in direzione dell'ufficio (Genova) nel pomeriggio.
-   - Per gli interventi in città devi sempre controllare gli indirizzi per far si che clienti vicini siano vicini negli orari, nel pomeriggio puoi anche mettere appuntamenti nella direttrice tra gli interventi pianificati e il nostro ufficio
-    NON mischiare MAI direttrici opposte nello stesso giorno (Es: la Valle di Masone non si mischia con la riviera di Ponente; la Val Scrivia non si mischia con il Levante).
+   - È assolutamente VIETATO far fare "salti qua e là" al tecnico. Usa SEMPRE la logica della massima vicinanza tra i clienti.
+   - Per zone fuori città: il giro DEVE iniziare dal cliente più lontano al mattino, inserendo i clienti più vicini man mano che si torna verso l'ufficio (Genova) nel pomeriggio.
+   - NON mischiare MAI direttrici opposte nello stesso giorno (Es: Valle di Masone non si mischia con la riviera di Ponente).
 
 2. ORARI E TOLLERANZA (L'OBIETTIVO È IL RIENTRO IN SEDE):
-   - Inizio turno: ore 08:00 dall'ufficio.
-   - Il primo appuntamento primo appuntamento no prima delle 8:30 
-   - Devi calcolare il giro in modo che il tecnico arrivi al cliente finale e rientri verso l'ufficio intorno alle 17:00 / 17:15.
-   - Devi calcolare gli impegni tenendo conto di quante attrezzature ha il cliente per i presidi (estintori,idranti e porte rei) tieni conto di 3 minuti cad. con non meno di 20 minuti di gestione in caso il cliente abbia fino a 3 presidi. Se c'e impianto Rivelazione incendi o sprinkler tieni 30 minuti a impianto. 
-   - Tolleranza traffico: È ammesso un margine di 15-30 minuti (massimo entro le 18:00) SOLO per permettere il tragitto finale di rientro o completare l'ultimo intervento. Qualsiasi cantiere che faccia sforare le 18:00 deve essere SCARTATO nei "sospesi".
-   - Quando carichi gli appuntamenti su calendar google devi crearli con le durate corrette e con il trasferimento real ma non inferiore mai a 20 minuti. 
-   
+   - Inizio turno: ore 08:00 dall'ufficio. Primo appuntamento NON prima delle 08:30.
+   - Il tecnico DEVE rientrare in ufficio entro le 17:00 / 17:15.
+   - Tempi presidi (estintori/idranti/porte): 3 minuti cadauno. Minimo intervento: 20 minuti (se fino a 3 presidi). Impianto Rivelazione/Sprinkler: 30 minuti a impianto. Trasferimento minimo tra cantieri su Calendar: 20 minuti.
+   - Tolleranza traffico: Ammesso un margine di 15-30 minuti (massimo entro le 18:00) SOLO per permettere il tragitto finale di rientro. 
+   - I cantieri in eccesso che fanno sforare le 18:00 DEVONO ESSERE SCARTATI nell'array "sospesi".
 
-3. GESTIONE DEI BUCHI A FINE GIORNATA E  INSERIMENTO INTERVENTI:
-   - Se controllando su calendario trovi interventi fissati in mezzo alla giornata DEVI tassativamente inserire interventi Prima e dopo quelle pianificazioni.
-   - Quando inserisci clienti prima dei pregressi DEVI riempire TUTTO il tempo Disponibile al tecnico non devi lasciare buchi temporali a parte l'ora di pausa del tecnico
-   - Se il giro finisce presto (es. alle 15:00) e il tecnico sta tornando verso Genova, verifica se nei "sospesi" ci sono clienti vicini (in zona) per riempire il buco.
-   - SE nei sospesi sono rimasti SOLO clienti lontani (es. tecnico in centro, sospeso a Rapallo), NON INSERIRLI. Piuttosto lascia la giornata mezza vuota e fai rientrare il tecnico.
+3. GESTIONE DEI BUCHI A FINE GIORNATA:
+   - DEVI riempire TUTTO il tempo disponibile al tecnico senza lasciare buchi, a parte la pausa.
+   - Se ci sono eventi pregressi fissati a metà giornata, inserisci interventi prima e dopo tali eventi per ottimizzare i tempi.
+   - Se a fine giro (es. ore 15:00) il tecnico torna verso Genova, cerca nei "sospesi" clienti di STRADA per riempire il buco. Se ci sono solo clienti lontani, non inserirli.
 
 4. GESTIONE DEI CANTIERI LUNGHI (I MACIGNI):
-   - Interventi > 6 ore: vanno piazzati SEMPRE a inizio giornata.
-   - Interventi > 8 ore: NON entrano fisicamente in una giornata. Scartali e mettili nei "sospesi", poi nella chat avvisa l'utente e chiedigli come vuole dividerli in più giorni.
+   - Interventi > 6 ore: Piazzali SEMPRE a inizio giornata.
+   - Interventi > 8 ore: NON entrano in una singola giornata. Scartali nei "sospesi" e nella risposta discorsiva (messaggioChat) avvisa l'utente.
 
 5. [SOS] E [INS]:
-   - [SOS] significa "Estintore da restituire al cliente". 
-   - [INS] significa insoluto contabile. Non hanno priorità logistica particolare, trattali come cantieri normali a meno che l'utente non ti dica diversamente in chat.
+   - [SOS] = Estintore da restituire. [INS] = Insoluto contabile. Trattali come cantieri normali a livello logistico.
 `;
 
     if (action === 'pianifica_settimana') {
-      const systemPrompt = `Sei il Responsabile Logistica Senior (Dispatcher) di Asso Antincendio a Genova. Il tuo compito è prendere una lista di cantieri grezzi e suddividerli in una settimana lavorativa, restituendo un piano perfettamente ottimizzato per il tecnico.
+      const systemPrompt = `Sei il Responsabile Logistica Senior (Dispatcher) di Asso Antincendio a Genova. Il tuo compito è prendere una lista di cantieri grezzi e ottimizzarli per una settimana lavorativa.
 
 ${regoleAssoAntincendio}
 
-Ricorda di consultare la cronologia della chat allegata: se l'utente ti ha dato in passato delle regole fisse o delle eccezioni, applicale rigorosamente alla pianificazione.
+Ricorda di consultare la cronologia della chat allegata: se l'utente ti ha dato in passato delle regole fisse o delle eccezioni, applicale rigorosamente.
 
-OUTPUT RICHIESTO:
-Restituisci UNICAMENTE un oggetto JSON valido racchiuso tra parentesi graffe, senza markdown o testo aggiuntivo. Struttura:
+OUTPUT RICHIESTO (RAGIONA PRIMA DI SCRIVERE IL JSON):
+Fase 1: Scrivi un blocco testuale che inizia con "ANALISI LOGISTICA:". Qui devi elencare brevemente i raggruppamenti per zona e verificare matematicamente che la somma dei minuti non superi l'orario di fine turno.
+Fase 2: Restituisci il piano in formato JSON racchiuso tra parentesi graffe. Struttura esatta:
 {
   "giorni": {
     "2026-10-05": ["codiceCliente1", "codiceCliente2"]
@@ -99,36 +98,41 @@ Restituisci UNICAMENTE un oggetto JSON valido racchiuso tra parentesi graffe, se
 
       const result = await generateWithRetry(model, [{ text: systemPrompt }, { text: promptData }]);
       const responseText = result.response.text();
-      const matchJson = responseText.match(/\{[\s\S]*\}/);
-      if (!matchJson) throw new Error("Nessun JSON valido trovato nella risposta IA");
-      const pianoParsed = JSON.parse(matchJson[0]);
+      
+      const firstBrace = responseText.indexOf('{');
+      const lastBrace = responseText.lastIndexOf('}');
+      if (firstBrace === -1 || lastBrace === -1) throw new Error("Nessun JSON valido trovato nella risposta IA");
+      
+      const jsonStr = responseText.slice(firstBrace, lastBrace + 1);
+      const pianoParsed = JSON.parse(jsonStr);
       
       return NextResponse.json({ success: true, piano: pianoParsed });
     }
 
     if (action === 'modifica_chat') {
-      const systemPrompt = `Sei l'Assistente Logistico Senior (Dispatcher) di Asso Antincendio a Genova. Devi analizzare il comando dell'utente, rispondere in modo proattivo e applicare le modifiche allo STATO LOGISTICO ATTUALE della plancia.
+      const systemPrompt = `Sei l'Assistente Logistico Senior di Asso Antincendio. Devi analizzare il comando dell'utente e applicare le modifiche allo STATO LOGISTICO ATTUALE.
 
 ${regoleAssoAntincendio}
 
 ${historyTestuale}
 
-STATO LOGISTICO ATTUALE RICEVUTO DAL SISTEMA FRONTEND:
+STATO LOGISTICO ATTUALE (DA MODIFICARE):
 ${JSON.stringify(statoAttuale, null, 2)}
 
-REGOLE ASSOLUTE DI RISPOSTA IN CHAT:
-1. "messaggioChat": Sii proattivo e di supporto. Usa il tono di un vero capozona. Fai notare se l'utente ti chiede una modifica che vìola una delle regole aziendali (es. mischiare direttrici), ma eseguila comunque se è un comando diretto. Se ci sono cantieri > 8 ore nei sospesi, chiedi all'utente come vuole dividerli. 
-2. Ordine dell'Array: Quando restituisci l'elenco dei cantieri nel campo "giorni", l'ordine è cruciale. L'inizio dell'array è il mattino, la fine dell'array è il pomeriggio.
-3. PREGRESSI: I codici che iniziano con "PREGRESSO_" sono eventi fissi di Google Calendar. NON PUOI RIMUOVERLI. Devi solo posizionarli nell'array nel punto giusto per fare da "spartiacque" temporale (es. prima del pregresso, dopo il pregresso).
-4. Nessun tralasciamento: Ricopia integralmente i codici dei cantieri e i giorni che non hai toccato. I cantieri che l'utente ti chiede di togliere da un giorno devono finire obbligatoriamente nell'array "sospesi".
-5. Restituisci ESCLUSIVAMENTE JSON puro, senza blocchi di markdown \`\`\`json.
+REGOLE DI RISPOSTA:
+1. Sii proattivo: Fai notare se l'utente chiede una modifica che vìola una regola (es. mischiare direttrici), ma ESEGUILA COMUNQUE.
+2. Ordine: L'inizio dell'array è il mattino, la fine dell'array è il pomeriggio.
+3. PREGRESSI: I codici che iniziano con "PREGRESSO_" sono intoccabili, usali come "spartiacque".
+4. Non perdere dati: Ricopia integralmente i codici dei cantieri e i giorni che non hai toccato. I cantieri rimossi vanno spostati in "sospesi".
 
-FORMATO JSON ESATTO E OBBLIGATORIO:
+OUTPUT RICHIESTO (RAGIONA PRIMA DI SCRIVERE IL JSON):
+Fase 1: Scrivi un blocco testuale che inizia con "ANALISI COMANDO:" in cui valuti l'ordine dell'utente e fai un calcolo logico.
+Fase 2: Genera il JSON racchiuso tra parentesi graffe. Formato:
 {
-  "messaggioChat": "Ciao capo, ho rimosso il cantiere come richiesto. Ho evitato di infilare un SOS lontano perché...",
+  "messaggioChat": "Ciao capo, ho spostato il cantiere...",
   "piano": {
     "giorni": {
-      "YYYY-MM-DD": ["codice1", "PREGRESSO_...", "codice2"]
+      "2026-10-05": ["codice1", "PREGRESSO_...", "codice2"]
     },
     "sospesi": ["codice3"]
   }
@@ -139,12 +143,15 @@ FORMATO JSON ESATTO E OBBLIGATORIO:
       const result = await generateWithRetry(model, [{ text: systemPrompt }, { text: instruction }]);
       const responseText = result.response.text();
       
-      const matchJson = responseText.match(/\{[\s\S]*\}/);
-      if (!matchJson) throw new Error("Nessun JSON valido trovato nella risposta della chat");
+      const firstBrace = responseText.indexOf('{');
+      const lastBrace = responseText.lastIndexOf('}');
+      if (firstBrace === -1 || lastBrace === -1) throw new Error("Nessun JSON valido trovato nella risposta IA della chat");
+      
+      const jsonStr = responseText.slice(firstBrace, lastBrace + 1);
       
       let parsedOutput;
       try {
-        parsedOutput = JSON.parse(matchJson[0]);
+        parsedOutput = JSON.parse(jsonStr);
       } catch (e) {
         throw new Error("Il JSON restituito dall'IA non è formattato correttamente.");
       }
