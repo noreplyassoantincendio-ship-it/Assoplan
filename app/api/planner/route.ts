@@ -61,7 +61,8 @@ LE TAVOLE DELLA LEGGE DI ASSO ANTINCENDIO (REGOLE DA RISPETTARE SEMPRE):
    - Devi calcolare il giro in modo che il tecnico arrivi al cliente finale e rientri verso l'ufficio intorno alle 17:00 / 17:15.
    - Tolleranza traffico: È ammesso un margine di 15-30 minuti (massimo entro le 18:00) SOLO per permettere il tragitto finale di rientro o completare l'ultimo intervento. Qualsiasi cantiere che faccia sforare le 18:00 deve essere SCARTATO nei "sospesi".
 
-3. GESTIONE DEI BUCHI A FINE GIORNATA:
+3. GESTIONE DEI BUCHI A FINE GIORNATA E  INSERIMENTO INTERVENTI:
+   - Se controllando su calendario trovi interventi fissati in mezzo alla giornata DEVI tassativamente inserire interventi Prima e dopo quelle pianificazioni. 
    - Se il giro finisce presto (es. alle 15:00) e il tecnico sta tornando verso Genova, verifica se nei "sospesi" ci sono clienti vicini (in zona) per riempire il buco.
    - SE nei sospesi sono rimasti SOLO clienti lontani (es. tecnico in centro, sospeso a Rapallo), NON INSERIRLI. Piuttosto lascia la giornata mezza vuota e fai rientrare il tecnico.
 
