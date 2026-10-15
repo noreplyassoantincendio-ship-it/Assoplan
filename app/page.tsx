@@ -535,7 +535,7 @@ export default function Home() {
     let stringaContatti = [contattoInfo, telInfo, emailInfo].filter(Boolean).join("\n");
     if (stringaContatti.length > 0) stringaContatti = `\n${stringaContatti}\n`;
 
-    return `Località: ${cliente.localita || ''}
+    return `Località: ${cliente.cap ? cliente.cap + ' ' : ''}${cliente.localita || ''}
 Indirizzo: ${cliente.indirizzo || ''}
 ${stringaContatti}
 🛠 ATTREZZATURE DA VERIFICARE:
@@ -543,7 +543,7 @@ ${attrezzatureTesto}
 
 Durata: ${cliente.minutiLavoro} min
 📍 Naviga:
-https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${cliente.indirizzo}, ${cliente.localita || 'Genova'}, Italy`)}
+https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${cliente.indirizzo}, ${cliente.cap ? cliente.cap + ' ' : ''}${cliente.localita || 'Genova'}, Italy`)}
 
 Tecnico: ${tecnicoNome}`;
   };
@@ -746,7 +746,9 @@ Tecnico: ${tecnicoNome}`;
       if (!clientiMappa.has(idCliente)) {
         clientiMappa.set(idCliente, {
           codice: idCliente, numeroBi, nome: riga.desclifor || "Sconosciuto",
-          indirizzo: riga.indirizzo || riga.INDIRIZZO || "", localita: riga.localita || riga.LOCALITA || "",
+          indirizzo: riga.indirizzo || riga.INDIRIZZO || "", 
+          localita: riga.localita || riga.LOCALITA || "",
+          cap: riga.cap || riga.CAP || "",
           telefono: telDaUsare, email: emailDaUsare, contatto: contattoDaUsare,
           haInsoluto: false, resoEstintori: false, totaleArticoli: 0, minutiLavoro: 10, dettaglioAttrezzature: [], selezionatoPerGiro: false, giorniDallUltimoSos: 8, syncedToGoogle: false, muletti_eorv: 0,
           _rawItems: [], _maxMt: { eo: 0, po: 0, id: 0, la: 0, ir: 0, ss: 0, ri: 0, gp: 0, rv: 0 }
@@ -1343,7 +1345,7 @@ Tecnico: ${tecnicoNome}`;
 
         const event = {
           summary: generaTitoloEvento(clienteSospeso),
-          location: `${clienteSospeso.indirizzo}, ${clienteSospeso.localita || 'Genova'}, Italia`,
+          location: `${clienteSospeso.indirizzo}, ${clienteSospeso.cap ? clienteSospeso.cap + ' ' : ''}${clienteSospeso.localita || 'Genova'}, Italia`,
           description: generaDescrizioneEvento(clienteSospeso, tecnicoSelezionato.nome, tecnicoSelezionato.email),
           start: { dateTime: startDateTime.toISOString(), timeZone: 'Europe/Rome' },
           end: { dateTime: endDateTime.toISOString(), timeZone: 'Europe/Rome' },
@@ -1402,7 +1404,7 @@ Tecnico: ${tecnicoNome}`;
 
         const event = {
             summary: generaTitoloEvento(cliente),
-            location: `${cliente.indirizzo}, ${cliente.localita || 'Genova'}, Italia`,
+            location: `${cliente.indirizzo}, ${cliente.cap ? cliente.cap + ' ' : ''}${cliente.localita || 'Genova'}, Italia`,
             description: generaDescrizioneEvento(cliente, tecnicoSelezionato.nome, tecnicoSelezionato.email),
             start: { dateTime: startDateTime.toISOString(), timeZone: 'Europe/Rome' },
             end: { dateTime: endDateTime.toISOString(), timeZone: 'Europe/Rome' },
