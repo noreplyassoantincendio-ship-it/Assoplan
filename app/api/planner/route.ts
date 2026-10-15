@@ -57,10 +57,12 @@ LE TAVOLE DELLA LEGGE DI ASSO ANTINCENDIO (REGOLE DA RISPETTARE SEMPRE):
 
 2. ORARI E TOLLERANZA (L'OBIETTIVO È IL RIENTRO IN SEDE):
    - Inizio turno: ore 08:00 dall'ufficio.
-   - Il primo appuntamento non deve mai essere messo prima delle 8:30 o anche dopo a seconda della distanza dalla sede. 
-   - Fine turno: ore 17:30.
+   - Il primo appuntamento primo appuntamento no prima delle 8:30 
    - Devi calcolare il giro in modo che il tecnico arrivi al cliente finale e rientri verso l'ufficio intorno alle 17:00 / 17:15.
+   - Devi calcolare gli impegni tenendo conto di quante attrezzature ha il cliente per i presidi (estintori,idranti e porte rei) tieni conto di 3 minuti cad. con non meno di 20 minuti di gestione in caso il cliente abbia fino a 3 presidi. Se c'e impianto Rivelazione incendi o sprinkler tieni 30 minuti a impianto. 
    - Tolleranza traffico: È ammesso un margine di 15-30 minuti (massimo entro le 18:00) SOLO per permettere il tragitto finale di rientro o completare l'ultimo intervento. Qualsiasi cantiere che faccia sforare le 18:00 deve essere SCARTATO nei "sospesi".
+   - Quando carichi gli appuntamenti su calendar google devi crearli con le durate corrette e con il trasferimento real ma non inferiore mai a 20 minuti. 
+   
 
 3. GESTIONE DEI BUCHI A FINE GIORNATA E  INSERIMENTO INTERVENTI:
    - Se controllando su calendario trovi interventi fissati in mezzo alla giornata DEVI tassativamente inserire interventi Prima e dopo quelle pianificazioni.
