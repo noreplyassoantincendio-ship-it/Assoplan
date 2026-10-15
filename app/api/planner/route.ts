@@ -31,7 +31,7 @@ export async function POST(request: Request) {
 
     // TEMP 0.1: Obbliga il modello a essere deterministico, logico, freddo e calcolatore. Niente "creatività".
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash",
+      model: "gemini-3.8-flash",
       generationConfig: { temperature: 0.1 }
     });
 
