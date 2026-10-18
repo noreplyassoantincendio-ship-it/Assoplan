@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import dynamic from "next/dynamic";
-import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database, Car, Home as HomeIcon, AlertOctagon, MessageSquare, Image as ImageIcon } from "lucide-react";
+import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database, Car, Home as HomeIcon, AlertOctagon, MessageSquare } from "lucide-react";
 
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLayer), { ssr: false });
@@ -749,7 +749,6 @@ Tecnico: ${tecnicoNome}`;
           cap: riga.cap || riga.CAP || "",
           telefono: telDaUsare, email: emailDaUsare, contatto: contattoDaUsare,
           haInsoluto: false, resoEstintori: false, totaleArticoli: 0, minutiLavoro: 10, dettaglioAttrezzature: [], selezionatoPerGiro: false, giorniDallUltimoSos: 8, syncedToGoogle: false, muletti_eorv: 0,
-          foto: [],
           _rawItems: [], _maxMt: { eo: 0, po: 0, id: 0, la: 0, ir: 0, ss: 0, ri: 0, gp: 0, rv: 0 }
         });
       }
@@ -759,14 +758,6 @@ Tecnico: ${tecnicoNome}`;
       const numFattura = riga.numft ? String(riga.numft).trim() : "";
       if (numFattura !== "" && numFattura !== "-" && (parseFloat(riga.imptotft) || 0) > 0 && !(riga.codpagam || "").toUpperCase().trim().startsWith("RB")) cliente.haInsoluto = true;
       if ((riga.codclose ? String(riga.codclose).toUpperCase().trim() : "") === "SOS" || testoRiga.includes("SOS")) cliente.resoEstintori = true;
-
-      // Estrazione foto se presenti nel file/riga
-      const rowFoto = riga.foto || riga.FOTO || riga.fotoIds || riga.FOTOIDS || riga.immagini || riga.IMMAGINI || [];
-      if (Array.isArray(rowFoto)) {
-          cliente.foto = [...cliente.foto, ...rowFoto];
-      } else if (rowFoto) {
-          cliente.foto.push(rowFoto);
-      }
 
       const qta = Number(riga.quantita) || 0;
       const desc = String(riga.desdocrig || "");
@@ -923,8 +914,7 @@ Tecnico: ${tecnicoNome}`;
             selezionatoPerGiro: true, syncedToGoogle: true,
             minutiLavoro: evt.durataMinuti, lat: evt.lat, lng: evt.lng,
             contatto, telefono, email, muletti_eorv: 0, origineCoord: "calendar",
-            descrizionePregressa: evt.description || "Nessun dettaglio da Google",
-            foto: []
+            descrizionePregressa: evt.description || "Nessun dettaglio da Google"
         };
     });
 
@@ -1065,7 +1055,7 @@ Tecnico: ${tecnicoNome}`;
         return 0;
     });
 
-    const resRic = await ricalcolaDistinteEOrari(datiCombinati, giornateStats, true);
+    const resRic = await ricalcolaDistinteEOrari(datiCombinati, giornateStrutturate, true);
     setInterventiGrezzi(resRic.listaOrdinata);
     setGiornateStats(resRic.statsAggiornate);
     setClientiInSospeso(clientiSospesiTmp); 
@@ -1960,29 +1950,6 @@ Tecnico: ${tecnicoNome}`;
                           <div><strong className="text-slate-500 block mb-0.5">Telefono:</strong> <span className="font-bold text-slate-900">{clienteSelezionatoScheda.telefono || "Nessun telefono"}</span></div>
                           <div className="col-span-2"><strong className="text-slate-500 block mb-0.5">Email:</strong> <span className="font-bold text-slate-900">{clienteSelezionatoScheda.email || "Nessuna email"}</span></div>
                        </div>
-
-                       {/* ANTEPRIME FOTO NEL MODALE */}
-                       {(() => {
-                          const fotoList = Array.isArray(clienteSelezionatoScheda.foto) 
-                             ? clienteSelezionatoScheda.foto 
-                             : (clienteSelezionatoScheda.foto ? [clienteSelezionatoScheda.foto] : (clienteSelezionatoScheda.fotoIds || []));
-                          if (fotoList.length === 0) return null;
-                          return (
-                             <div>
-                                <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider mb-2 flex items-center gap-1.5"><ImageIcon size={14} className="text-blue-600"/> Foto / Allegati ({fotoList.length}):</h4>
-                                <div className="flex gap-2 overflow-x-auto pb-2">
-                                   {fotoList.map((f: string, idx: number) => {
-                                      const imgSrc = f.startsWith('data:image') ? f : (f.length > 20 && !f.includes('http') && !f.includes('/') ? `https://drive.google.com/thumbnail?id=${f}&sz=w400-h400` : f);
-                                      return (
-                                         <a key={idx} href={imgSrc} target="_blank" rel="noopener noreferrer" className="shrink-0">
-                                            <img src={imgSrc} alt="Anteprima" className="w-20 h-20 object-cover rounded-xl border border-slate-200 shadow-sm hover:opacity-95 transition-opacity" onError={(e)=>{ (e.target as HTMLElement).style.display = 'none'; }} />
-                                         </a>
-                                      );
-                                   })}
-                                </div>
-                             </div>
-                          );
-                       })()}
 
                        <div>
                           <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider mb-2">Attrezzature da Verificare ({clienteSelezionatoScheda.totaleArticoli || 0} pz):</h4>
