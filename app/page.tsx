@@ -5,7 +5,14 @@ import { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import dynamic from "next/dynamic";
-import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database, Car, Home as HomeIcon, AlertOctagon, MessageSquare, ArrowRightLeft, List, Map, FileUp, Settings } from "lucide-react";
+import {
+  UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet,
+  Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Mail, Timer,
+  FileText, X, Sliders, Check, PauseCircle, ExternalLink, AlertTriangle,
+  CheckCircle, PlayCircle, Lock, CalendarPlus, Phone, Book, User,
+  Banknote, Car, Home as HomeIcon, AlertOctagon, MessageSquare,
+  ArrowRightLeft, List, Map as MapIcon, FileUp
+} from "lucide-react";
 
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLayer), { ssr: false });
@@ -190,11 +197,13 @@ const calcolaTempoDistanzaGoogle = async (lat1: number, lon1: number, lat2: numb
         const destination = new window.google.maps.LatLng(lat2, lon2);
         
         const response: any = await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error("Timeout DistanceMatrix")), 3000);
             service.getDistanceMatrix({
                 origins: [origin],
                 destinations: [destination],
                 travelMode: window.google.maps.TravelMode.DRIVING,
             }, (res: any, status: any) => {
+                clearTimeout(timer);
                 if (status === "OK") resolve(res);
                 else reject(status);
             });
@@ -210,7 +219,7 @@ const calcolaTempoDistanzaGoogle = async (lat1: number, lon1: number, lat2: numb
            return risultato;
         }
     } catch (e) {
-        console.error("Errore Distance Matrix API JS SDK:", e);
+        console.error("Fallback distanza lineare:", e);
     }
     
     const dist = calcolaDistanzaKm(lat1, lon1, lat2, lon2);
@@ -261,7 +270,7 @@ export default function Home() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [messages, setMessages] = useState([
-    { sender: 'ai', text: 'Ciao! Sono l\'Assistente IA. Carica un file e chiedimi di ricalcolare i giri o spostare gli interventi.' }
+    { sender: 'ai', text: 'Ciao! Sono il tuo assistente operativo. Carica il file Excel e chiedimi di pianificare o spostare cantieri.' }
   ]);
   const [chatLoading, setChatLoading] = useState(false);
   
@@ -733,7 +742,6 @@ Tecnico: ${tecnicoNome}`;
         let righeScartate = 0;
 
         for (const riga of righe) {
-          // FORZATURA A STRINGA: impedisce l'errore toUpperCase su celle numeriche (il motivo del blocco al 5%)
           const nomeCliente = String(riga.desclifor || "").toUpperCase();
           if (!nomeCliente) {
              righeScartate++;
@@ -1057,7 +1065,12 @@ Tecnico: ${tecnicoNome}`;
         } catch (e: any) {
             clearInterval(simInterval);
             console.error("Dettaglio errore IA:", e);
-            throw new Error(`Errore di comunicazione con l'IA: ${e.message}`);
+            if (typeof window !== 'undefined') {
+                window.alert(`Errore IA: ${e.message || "Errore sconosciuto"}. I cantieri sono stati inseriti nei Sospesi.`);
+            }
+            unassigned.forEach(c => {
+                clientiSospesiTmp.push({ ...c, motivoSospeso: `Errore: ${e.message || "Sconosciuto"}`, selezionatoPerGiro: false, dataAssegnata: null });
+            });
         }
 
         setProgressIA({ active: true, percent: 98, text: "Finalizzazione plancia logistica..." });
@@ -1086,9 +1099,8 @@ Tecnico: ${tecnicoNome}`;
         setInElaborazione(false);
         
     } catch (error: any) {
-        // SISTEMA SALVAVITA: Cattura errori nascosti e sblocca l'interfaccia
         console.error("Errore critico durante processaRighe:", error);
-        alert(`Generazione interrotta per errore sui dati: ${error.message}. Controlla che il file Excel non contenga caratteri strani.`);
+        alert(`Generazione interrotta: ${error.message}`);
         setProgressIA({ active: false, percent: 0, text: "" });
         setInElaborazione(false);
     }
@@ -1102,7 +1114,7 @@ Tecnico: ${tecnicoNome}`;
       e.preventDefault(); 
   };
 
-  const handleDropToDay = async (e: React.DragEvent, targetDataAssegnata: string, targetCodice?: string) => {
+  const handleDropToDay = async (e: React.DragEvent, targetDataAssegnata: string | null, targetCodice?: string) => {
       e.preventDefault();
       e.stopPropagation();
       setDragOverCard(null);
@@ -1140,6 +1152,7 @@ Tecnico: ${tecnicoNome}`;
 
           if (dataDestinazione) {
               item.dataAssegnata = dataDestinazione;
+              item.giorno = getNomeGiorno(dataDestinazione);
               
               if (targetCodice) {
                   const targetIndex = result.findIndex(i => i.codice === targetCodice && i.dataAssegnata === dataDestinazione);
@@ -1497,13 +1510,12 @@ Tecnico: ${tecnicoNome}`;
     return undefined;
   };
 
-  const interventiVisibiliArr = interventiGrezzi.filter(i => giornoSceltoFiltro === "Tutti" || i.dataAssegnata === giornoSceltoFiltro);
   const clientiAttiviCount = interventiGrezzi.filter(i => i.selezionatoPerGiro && !i.isDistinta && !i.isPregresso).length;
   const globaleAssegnati = interventiGrezzi.filter(i => i.selezionatoPerGiro && !i.isDistinta && !i.isPregresso);
   const globalPregressiCount = interventiGrezzi.filter(i => i.isPregresso).length;
   const totaleInCarico = globaleAssegnati.length + clientiInSospeso.length + globalPregressiCount;
   
-  const giorniVisibiliPerStampa = [...new Set(interventiVisibiliArr.map(i => i.dataAssegnata))].sort();
+  const giorniVisibiliPerStampa = [...new Set(interventiGrezzi.map(i => i.dataAssegnata).filter(Boolean))].sort();
 
   if (listaInsoluti) {
      return (
@@ -1564,8 +1576,8 @@ Tecnico: ${tecnicoNome}`;
      );
   }
 
-  let listaAttiva = [];
-  let statGiornoAttivo = null;
+  let listaAttiva: any[] = [];
+  let statGiornoAttivo: any = null;
 
   if (giornoSceltoFiltro === "sospesi") {
       listaAttiva = clientiInSospeso;
@@ -1575,151 +1587,219 @@ Tecnico: ${tecnicoNome}`;
   }
 
   return (
-    <div className="flex h-screen w-full bg-slate-50 text-slate-900 font-sans overflow-hidden relative print:h-auto print:overflow-visible print:bg-white" onClick={() => setMenuAperto(null)}>
+    <div className="flex flex-col h-screen w-full bg-slate-100 text-slate-900 font-sans overflow-hidden relative print:h-auto print:overflow-visible print:bg-white" onClick={() => setMenuAperto(null)}>
       
+      {/* OVERLAY BARRA DI PROGRESSIONE IA */}
       {progressIA.active && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] bg-white rounded-2xl shadow-2xl border border-slate-200 p-4 w-[90%] max-w-md flex flex-col gap-3">
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] bg-white rounded-2xl shadow-2xl border border-blue-200 p-4 w-[90%] max-w-md flex flex-col gap-3">
            <div className="flex justify-between items-center">
-              <span className="text-xs font-bold text-slate-700 flex items-center gap-2"><Loader2 size={14} className="animate-spin text-slate-900"/> {progressIA.text}</span>
-              <span className="text-xs font-extrabold text-slate-900">{progressIA.percent}%</span>
+              <span className="text-xs font-bold text-slate-700 flex items-center gap-2"><Loader2 size={14} className="animate-spin text-blue-600"/> {progressIA.text}</span>
+              <span className="text-xs font-extrabold text-blue-700">{progressIA.percent}%</span>
            </div>
            <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-              <div className="bg-slate-900 h-full rounded-full transition-all duration-500 ease-out" style={{ width: `${progressIA.percent}%` }}></div>
+              <div className="bg-blue-600 h-full rounded-full transition-all duration-500 ease-out" style={{ width: `${progressIA.percent}%` }}></div>
            </div>
         </div>
       )}
 
-      <header className="w-full bg-white border-b border-slate-200 px-6 py-4 flex flex-col md:flex-row justify-between items-start md:items-center shrink-0 z-30 print:hidden">
-         <div className="flex items-center gap-4">
-            <div className="p-2.5 bg-slate-900 text-white rounded-xl shadow-sm"><Zap size={20} /></div>
+      {/* HEADER PRINCIPALE COMPATTO MA COMPLETO */}
+      <header className="w-full bg-white border-b border-slate-200 px-6 py-3 flex flex-wrap justify-between items-center gap-4 shrink-0 z-30 print:hidden">
+         <div className="flex items-center gap-3">
+            <span className="p-2 bg-blue-600 text-white rounded-xl shadow-sm"><Zap size={20} /></span>
             <div>
-              <h1 className="text-xl font-extrabold tracking-tight text-slate-900">
-                Route Manager <span className="text-slate-400 font-normal">| Asso Antincendio</span>
+              <h1 className="text-lg font-extrabold tracking-tight text-slate-900 flex items-center gap-2">
+                Asso Antincendio <span className="text-blue-600 font-normal text-sm">| Smart Logistics</span>
               </h1>
+              <p className="text-[11px] text-slate-500">Rubrica in memoria, Pausa Pranzo Dinamica & Motore Multi-Agente IA</p>
             </div>
          </div>
 
-         <div className="flex items-center gap-3 mt-4 md:mt-0">
-             <div className="flex items-center gap-2">
-                 <select value={tecnicoSelezionato.nome} onChange={(e) => { const t = tecniciAnagrafica.find(t => t.nome === e.target.value); if(t) setTecnicoSelezionato(t); }} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none cursor-pointer">
-                    {tecniciAnagrafica.map((t, idx) => <option key={idx} value={t.nome}>{t.nome}</option>)}
-                 </select>
-             </div>
-             
-             <label className={`cursor-pointer px-4 py-2 rounded-xl font-bold text-xs shadow-sm border transition-all flex items-center gap-2 ${datiGrezziCaricati.length > 0 ? 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50' : 'bg-slate-900 text-white border-slate-900 hover:bg-slate-800'}`}>
-                 <FileSpreadsheet size={16} /> {datiGrezziCaricati.length > 0 ? "File Caricato" : "Carica Excel"}
-                 <input type="file" accept=".xlsx, .xls, .csv, .txt" className="hidden" onChange={handleFileUpload} disabled={!googleToken} />
-             </label>
+         {/* STRUMENTI RAPIDI E CONNESSIONI */}
+         <div className="flex flex-wrap items-center gap-2">
+            <Link href="/flussi" className="px-3 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold hover:bg-blue-100 transition flex items-center gap-1.5">
+              📊 Gestione Flussi
+            </Link>
 
-             <button
-                 onClick={() => processaRighe(datiGrezziCaricati)}
-                 disabled={datiGrezziCaricati.length === 0 || inElaborazione}
-                 className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm ${(datiGrezziCaricati.length > 0 && !inElaborazione) ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'}`}
-             >
-                 {inElaborazione ? <Loader2 size={16} className="animate-spin"/> : <PlayCircle size={16} />} Genera Rotte
-             </button>
-             
-             {!googleToken ? (
-                 <button onClick={eseguiLoginGoogle} className="bg-white hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-xl font-bold border border-slate-300 shadow-sm text-xs flex items-center gap-2"><Calendar size={16} /> Connetti Google</button>
-             ) : (
-                 <button onClick={inviaPianificazioneAGoogle} disabled={bulkSyncStatus.active || globaleAssegnati.filter(i=>!i.syncedToGoogle).length === 0} className="bg-white hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-xl font-bold border border-slate-300 shadow-sm text-xs flex items-center gap-2 disabled:opacity-50">
-                     {bulkSyncStatus.active ? <Loader2 size={16} className="animate-spin"/> : <UploadCloud size={16} />} Salva Calendario
-                 </button>
-             )}
+            <a href="https://calendar.google.com" target="_blank" rel="noopener noreferrer" className="px-3 py-2 bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold hover:bg-slate-100 transition flex items-center gap-1.5">
+              <Phone size={14} /> Chiamate <ExternalLink size={12} className="opacity-60" />
+            </a>
+
+            <label className={`px-3 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer border ${Object.keys(rubricaClienti).length > 0 ? 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}>
+              <Book size={14} />
+              {Object.keys(rubricaClienti).length > 0 ? `Rubrica (${Object.keys(rubricaClienti).length})` : "Carica Rubrica"}
+              <input type="file" accept=".xlsx, .xls, .csv, .txt" className="hidden" onChange={handleRubricaUpload} />
+            </label>
+
+            <label className="px-3 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer bg-red-50 text-red-700 hover:bg-red-100 border border-red-200">
+              <Banknote size={14} /> Lista Insoluti
+              <input type="file" accept=".xlsx, .xls, .csv" className="hidden" onChange={handleInsolutiUpload} />
+            </label>
+
+            {isCheckingAuth ? (
+              <span className="text-slate-500 font-bold flex items-center gap-1.5 text-xs px-3 py-2"><Loader2 size={14} className="animate-spin text-blue-600" /> Verifica...</span>
+            ) : !googleToken ? (
+              <button onClick={eseguiLoginGoogle} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-1.5 shadow-sm text-xs"><Calendar size={14} /> Connetti Google</button>
+            ) : (
+              <div className="flex items-center gap-1">
+                <span className="bg-emerald-50 text-emerald-800 px-3 py-2 rounded-xl font-bold flex items-center gap-1.5 border border-emerald-200 text-xs"><Check size={14} /> Calendar OK</span>
+                <button onClick={logoutGoogle} title="Disconnetti Google" className="bg-white hover:bg-red-50 text-slate-500 hover:text-red-600 p-2 rounded-xl border border-slate-200"><X size={14} /></button>
+              </div>
+            )}
          </div>
       </header>
 
-      <div className="flex-1 flex flex-col overflow-hidden">
+      {/* CRUSCOTTO DI CONTROLLO OPERATIVO (SEMPRE VISIBILE) */}
+      <div className="bg-white border-b border-slate-200 px-6 py-3 shrink-0 z-20 print:hidden">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
           
-          <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 shrink-0 z-20 print:hidden">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                 <div className="p-4 bg-white rounded-xl border border-slate-200 flex items-center gap-4 shadow-sm">
-                    <div className="p-3 bg-slate-100 text-slate-600 rounded-lg"><Car size={20}/></div>
-                    <div>
-                        <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider">Totale In Carico</span>
-                        <span className="text-2xl font-extrabold text-slate-900">{totaleInCarico}</span>
-                    </div>
-                 </div>
-                 <div className="p-4 bg-white rounded-xl border border-slate-200 flex items-center gap-4 shadow-sm">
-                    <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg"><CheckCircle size={20}/></div>
-                    <div>
-                        <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider">Nuovi in Rotta</span>
-                        <span className="text-2xl font-extrabold text-emerald-600">{clientiAttiviCount}</span>
-                    </div>
-                 </div>
-                 <div className="p-4 bg-white rounded-xl border border-slate-200 flex items-center gap-4 shadow-sm">
-                    <div className="p-3 bg-amber-50 text-amber-600 rounded-lg"><PauseCircle size={20}/></div>
-                    <div>
-                        <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider">Finiti in Sospeso</span>
-                        <span className="text-2xl font-extrabold text-amber-600">{clientiInSospeso.length}</span>
-                    </div>
-                 </div>
-                 <div className="p-4 bg-white rounded-xl border border-slate-200 flex items-center gap-4 shadow-sm">
-                    <div className="p-3 bg-slate-100 text-slate-500 rounded-lg"><CalendarPlus size={20}/></div>
-                    <div>
-                        <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider">Già Fatti/Pregressi</span>
-                        <span className="text-2xl font-extrabold text-slate-600">{clientiGiaCalendarizzati.length + globalPregressiCount}</span>
-                    </div>
-                 </div>
-              </div>
+          {/* 1. PERIODO E GIORNI */}
+          <div className="lg:col-span-4 flex flex-wrap items-center gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-extrabold uppercase text-slate-500">Dal</span>
+              <input type="date" value={dataInizio} onChange={(e) => setDataInizio(e.target.value)} className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold focus:outline-none" />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-extrabold uppercase text-slate-500">Al</span>
+              <input type="date" value={dataFine} onChange={(e) => setDataFine(e.target.value)} className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold focus:outline-none" />
+            </div>
+            <div className="flex gap-1 ml-auto">
+              {Object.keys(giorniAttivi).map((g) => (
+                <button key={g} onClick={() => toggleGiornoAttivo(g)} className={`px-2 py-1 rounded-md text-[10px] font-extrabold transition ${giorniAttivi[g] ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-400 line-through'}`}>
+                  {g.slice(0, 3)}
+                </button>
+              ))}
+            </div>
           </div>
 
+          {/* 2. TECNICO, FILE EXCEL E AVVIO IA */}
+          <div className="lg:col-span-4 flex flex-wrap items-center gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+            <select value={tecnicoSelezionato.nome} onChange={(e) => { const t = tecniciAnagrafica.find(t => t.nome === e.target.value); if(t) setTecnicoSelezionato(t); }} className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 focus:outline-none cursor-pointer flex-1 min-w-[140px]">
+              {tecniciAnagrafica.map((t, idx) => <option key={idx} value={t.nome}>{t.nome}</option>)}
+            </select>
+
+            <label className={`px-3 py-1.5 rounded-lg font-bold text-xs shadow-sm transition-all flex items-center gap-1.5 border ${!googleToken ? 'opacity-50 cursor-not-allowed bg-slate-200 text-slate-500' : datiGrezziCaricati.length > 0 ? 'bg-blue-50 text-blue-800 border-blue-200 cursor-pointer hover:bg-blue-100' : 'bg-white text-slate-700 border-slate-300 cursor-pointer hover:bg-slate-100'}`} title={nomeFileCorrente}>
+              <FileSpreadsheet size={14} className="text-blue-600" />
+              <span className="truncate max-w-[110px]">{datiGrezziCaricati.length > 0 ? nomeFileCorrente : "Sfoglia Excel"}</span>
+              <input type="file" accept=".xlsx, .xls, .csv, .txt" className="hidden" onChange={handleFileUpload} disabled={!googleToken} />
+            </label>
+
+            <button
+              onClick={() => processaRighe(datiGrezziCaricati)}
+              disabled={datiGrezziCaricati.length === 0 || inElaborazione}
+              className={`px-4 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center gap-1.5 ${(datiGrezziCaricati.length > 0 && !inElaborazione) ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm cursor-pointer' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
+            >
+              {inElaborazione ? <><Loader2 size={14} className="animate-spin"/> Elaboro...</> : <><Sliders size={14} /> Genera Plancia</>}
+            </button>
+          </div>
+
+          {/* 3. CONTATORI RIEPILOGO */}
+          <div className="lg:col-span-4 grid grid-cols-4 gap-2">
+            <div className="px-3 py-1.5 bg-blue-50 rounded-xl border border-blue-200 flex flex-col justify-center">
+              <span className="text-[9px] text-blue-700 font-bold uppercase truncate">In Carico</span>
+              <span className="text-lg font-extrabold text-blue-900 leading-tight">{totaleInCarico}</span>
+            </div>
+            <div className="px-3 py-1.5 bg-emerald-50 rounded-xl border border-emerald-200 flex flex-col justify-center">
+              <span className="text-[9px] text-emerald-700 font-bold uppercase truncate">In Rotta</span>
+              <span className="text-lg font-extrabold text-emerald-900 leading-tight">{clientiAttiviCount}</span>
+            </div>
+            <div className="px-3 py-1.5 bg-amber-50 rounded-xl border border-amber-200 flex flex-col justify-center">
+              <span className="text-[9px] text-amber-700 font-bold uppercase truncate">Sospesi</span>
+              <span className="text-lg font-extrabold text-amber-900 leading-tight">{clientiInSospeso.length}</span>
+            </div>
+            <div className="px-3 py-1.5 bg-slate-100 rounded-xl border border-slate-200 flex flex-col justify-center">
+              <span className="text-[9px] text-slate-500 font-bold uppercase truncate">Già Fatti</span>
+              <span className="text-lg font-extrabold text-slate-700 leading-tight">{clientiGiaCalendarizzati.length}</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      {/* AREA PRINCIPALE: TAB GIORNI + SPLIT SCREEN */}
+      <div className="flex-1 flex flex-col overflow-hidden print:hidden">
+          
+          {/* BARRA DEI TAB (GIORNI + SALVA SU CALENDAR) */}
           {interventiGrezzi.length > 0 && (
-              <div className="bg-white border-b border-slate-200 px-6 py-2 flex items-center gap-2 overflow-x-auto shrink-0 custom-scrollbar z-20 print:hidden">
-                  <button 
-                      onClick={() => setGiornoSceltoFiltro("sospesi")}
-                      className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-xs transition-colors whitespace-nowrap ${giornoSceltoFiltro === "sospesi" ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
-                  >
-                      <PauseCircle size={14} /> Sospesi <span className={`px-1.5 py-0.5 rounded text-[10px] ${giornoSceltoFiltro === "sospesi" ? 'bg-slate-700 text-white' : 'bg-slate-200 text-slate-600'}`}>{clientiInSospeso.length}</span>
-                  </button>
-                  
-                  <div className="w-px h-6 bg-slate-200 mx-2"></div>
-                  
-                  {giornateStats.map(g => {
-                      const isOvertime = g.orarioFineMinuti > 1080;
-                      return (
-                          <button 
-                              key={g.dataStr}
-                              onClick={() => setGiornoSceltoFiltro(g.dataStr)}
-                              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-xs transition-colors whitespace-nowrap border ${giornoSceltoFiltro === g.dataStr ? 'bg-white border-slate-300 shadow-sm text-slate-900' : 'bg-transparent border-transparent text-slate-500 hover:bg-slate-50'}`}
-                          >
-                              {g.nomeGiorno} {formattaDataVisuale(g.dataStr).slice(0,5)}
-                              {isOvertime && <AlertOctagon size={12} className="text-red-500" />}
+              <div className="bg-white border-b border-slate-200 px-6 py-2 flex items-center justify-between gap-2 overflow-x-auto shrink-0 custom-scrollbar z-20">
+                  <div className="flex items-center gap-2">
+                      <button 
+                          onClick={() => setGiornoSceltoFiltro("sospesi")}
+                          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl font-bold text-xs transition-colors whitespace-nowrap cursor-pointer ${giornoSceltoFiltro === "sospesi" ? 'bg-amber-500 text-white shadow-sm' : 'bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100'}`}
+                      >
+                          <PauseCircle size={14} /> SOSPESI <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${giornoSceltoFiltro === "sospesi" ? 'bg-amber-700 text-white' : 'bg-amber-200 text-amber-900'}`}>{clientiInSospeso.length}</span>
+                      </button>
+                      
+                      <div className="w-px h-6 bg-slate-200 mx-1"></div>
+                      
+                      {giornateStats.map(g => {
+                          const isOvertime = g.orarioFineMinuti > 1080;
+                          const countGiorno = interventiGrezzi.filter(i => i.selezionatoPerGiro && !i.isDistinta && i.dataAssegnata === g.dataStr).length;
+                          const hh = String(Math.floor(g.orarioFineMinuti / 60)).padStart(2, '0');
+                          const mm = String(Math.floor(g.orarioFineMinuti % 60)).padStart(2, '0');
+                          return (
+                              <button 
+                                  key={g.dataStr}
+                                  onClick={() => setGiornoSceltoFiltro(g.dataStr)}
+                                  className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl font-bold text-xs transition-all whitespace-nowrap border cursor-pointer ${giornoSceltoFiltro === g.dataStr ? 'bg-slate-900 border-slate-900 text-white shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'}`}
+                              >
+                                  <span>{g.nomeGiorno} {formattaDataVisuale(g.dataStr).slice(0,5)}</span>
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${giornoSceltoFiltro === g.dataStr ? 'bg-slate-700 text-slate-200' : 'bg-white text-slate-600 border border-slate-200'}`}>
+                                      {countGiorno} ({hh}:{mm})
+                                  </span>
+                                  {isOvertime && <AlertOctagon size={13} className="text-red-400" />}
+                              </button>
+                          );
+                      })}
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                      <button onClick={() => window.print()} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3.5 py-1.5 rounded-xl font-bold flex items-center gap-1.5 text-xs border border-slate-200 cursor-pointer">
+                          <Printer size={14} /> Stampa Fogli Viaggio
+                      </button>
+                      {bulkSyncStatus.active ? (
+                          <div className="bg-blue-50 border border-blue-200 px-4 py-1.5 rounded-xl flex items-center gap-2 text-xs font-bold text-blue-800">
+                              <Loader2 size={14} className="animate-spin"/> Sync... {bulkSyncStatus.current}/{bulkSyncStatus.total}
+                          </div>
+                      ) : (
+                          <button onClick={inviaPianificazioneAGoogle} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-xl font-bold flex items-center gap-1.5 shadow-sm text-xs transition-all cursor-pointer">
+                              <UploadCloud size={14} /> Salva su Calendar ({globaleAssegnati.filter(i=>!i.syncedToGoogle).length})
                           </button>
-                      );
-                  })}
+                      )}
+                  </div>
               </div>
           )}
 
+          {/* SPLIT SCREEN CONTENUTO O WELCOME DASHBOARD */}
           {interventiGrezzi.length > 0 ? (
               <div className="flex-1 flex overflow-hidden">
                   
-                  <div className="w-full md:w-[45%] lg:w-[40%] h-full bg-white border-r border-slate-200 flex flex-col z-10">
+                  {/* PANNELLO SINISTRO: TABELLA DI MARCIA DEL GIORNO */}
+                  <div className="w-full md:w-[48%] lg:w-[44%] h-full bg-white border-r border-slate-200 flex flex-col z-10">
                       
-                      <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center shrink-0">
+                      <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
                           <div>
-                              <h2 className="font-extrabold text-slate-900 text-sm">
-                                  {giornoSceltoFiltro === "sospesi" ? "Cantieri in Sospeso" : `${statGiornoAttivo?.nomeGiorno} ${formattaDataVisuale(giornoSceltoFiltro)}`}
+                              <h2 className="font-extrabold text-slate-900 text-sm uppercase tracking-tight">
+                                  {giornoSceltoFiltro === "sospesi" ? "⏸ Archivio Cantieri in Sospeso" : `📅 ${statGiornoAttivo?.nomeGiorno} ${formattaDataVisuale(giornoSceltoFiltro)}`}
                               </h2>
-                              <p className="text-[10px] text-slate-500 font-medium mt-0.5">
-                                  {listaAttiva.length} interventi totali
+                              <p className="text-[11px] text-slate-500 font-medium">
+                                  Usa l'icona ⇄ per spostare un cantiere in 2 clic, oppure clicca su 📄 per la scheda completa.
                               </p>
                           </div>
                           {statGiornoAttivo && (
-                              <div className="text-right">
-                                  <span className={`text-[10px] font-bold px-2 py-1 rounded ${statGiornoAttivo.orarioFineMinuti > 1080 ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-700 border border-slate-200'}`}>
-                                      Fine stimata: {String(Math.floor(statGiornoAttivo.orarioFineMinuti / 60)).padStart(2, '0')}:{String(Math.floor(statGiornoAttivo.orarioFineMinuti % 60)).padStart(2, '0')}
+                              <div className="text-right shrink-0">
+                                  <span className={`text-xs font-extrabold px-2.5 py-1 rounded-lg flex items-center gap-1 ${statGiornoAttivo.orarioFineMinuti > 1080 ? 'bg-red-100 text-red-800 border border-red-200' : 'bg-emerald-100 text-emerald-800 border border-emerald-200'}`}>
+                                      {statGiornoAttivo.orarioFineMinuti > 1080 ? <AlertOctagon size={13}/> : <CheckCircle size={13}/>}
+                                      Fine: {String(Math.floor(statGiornoAttivo.orarioFineMinuti / 60)).padStart(2, '0')}:{String(Math.floor(statGiornoAttivo.orarioFineMinuti % 60)).padStart(2, '0')}
                                   </span>
                               </div>
                           )}
                       </div>
 
-                      <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar" onDragOver={handleDragOverKanban} onDrop={(e) => handleDropToDay(e, giornoSceltoFiltro === "sospesi" ? null : giornoSceltoFiltro)}>
+                      <div className="flex-1 overflow-y-auto p-3 space-y-1.5 custom-scrollbar" onDragOver={handleDragOverKanban} onDrop={(e) => handleDropToDay(e, giornoSceltoFiltro === "sospesi" ? null : giornoSceltoFiltro)}>
                           {listaAttiva.length === 0 ? (
-                              <div className="flex flex-col items-center justify-center h-40 text-slate-400">
-                                  <List size={32} className="mb-2 opacity-50" />
-                                  <p className="text-xs font-bold">Nessun cantiere presente</p>
-                                  <p className="text-[10px]">Trascina o sposta cantieri qui</p>
+                              <div className="flex flex-col items-center justify-center h-48 text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl m-2">
+                                  <List size={28} className="mb-2 opacity-50" />
+                                  <p className="text-xs font-bold">Nessun cantiere in questa vista</p>
                               </div>
                           ) : (
                               listaAttiva.map((item, idx) => (
@@ -1730,73 +1810,86 @@ Tecnico: ${tecnicoNome}`;
                                       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverCard(item.codice); }}
                                       onDragLeave={() => setDragOverCard(null)}
                                       onDrop={(e) => handleDropToDay(e, giornoSceltoFiltro === "sospesi" ? null : giornoSceltoFiltro, item.codice)}
-                                      className={`group relative flex items-center p-2 rounded-lg border transition-all bg-white
-                                          ${dragOverCard === item.codice ? 'border-t-2 border-t-slate-900 mt-1' : 'border-slate-200'}
-                                          ${item.isPregresso ? 'bg-slate-50 border-slate-200 cursor-not-allowed' : item.isDistinta ? 'bg-slate-50 border-slate-200 cursor-default' : 'hover:border-slate-400 cursor-grab active:cursor-grabbing hover:shadow-sm'}
+                                      onClick={() => {
+                                          if (giornoSceltoFiltro === "sospesi" && !(item.resoEstintori && item.giorniDallUltimoSos < 5)) {
+                                              apriModaleSospeso(item);
+                                          }
+                                      }}
+                                      className={`group relative flex items-center px-3 py-2 rounded-xl border transition-all
+                                          ${dragOverCard === item.codice ? 'border-t-4 border-t-blue-600 mt-1' : ''}
+                                          ${item.isPregresso ? 'bg-indigo-50/60 border-indigo-200 cursor-not-allowed' : item.isDistinta ? 'bg-orange-50/60 border-orange-200 cursor-default' : 'bg-white border-slate-200 hover:border-blue-400 cursor-grab active:cursor-grabbing shadow-xs hover:shadow-sm'}
                                       `}
                                   >
                                       {giornoSceltoFiltro !== "sospesi" && !item.isDistinta && (
-                                          <div className="w-6 shrink-0 flex justify-center">
-                                              <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center text-[9px] font-bold border border-slate-200">
+                                          <div className="w-7 shrink-0 flex justify-center mr-1">
+                                              <span className="w-5 h-5 rounded-full bg-slate-900 text-white flex items-center justify-center text-[10px] font-bold">
                                                   {idx + (listaAttiva[0]?.isDistinta ? 0 : 1)}
                                               </span>
                                           </div>
                                       )}
 
-                                      <div className="flex-1 min-w-0 pl-2 pr-16 flex flex-col justify-center">
-                                          <div className="flex items-center gap-2">
+                                      <div className="flex-1 min-w-0 pr-16">
+                                          <div className="flex items-center gap-1.5">
                                               {item.isDistinta ? (
-                                                  <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">MAGAZZINO</span>
+                                                  <span className="text-[9px] font-extrabold text-orange-800 bg-orange-100 px-1.5 py-0.5 rounded">MAGAZZINO</span>
                                               ) : item.isPregresso ? (
-                                                  <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded flex items-center gap-1"><Lock size={8}/> TASSATIVO</span>
+                                                  <span className="text-[9px] font-extrabold text-indigo-800 bg-indigo-100 px-1.5 py-0.5 rounded flex items-center gap-1"><Lock size={9}/> {item.oraInizio}-{item.oraFine}</span>
                                               ) : giornoSceltoFiltro !== "sospesi" ? (
-                                                  <span className="text-[10px] font-mono font-bold text-slate-900">{item.oraInizio}</span>
-                                              ) : (
-                                                  <span className="text-[9px] font-mono font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">BI:{item.numeroBi}</span>
+                                                  <span className="text-[10px] font-mono font-extrabold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">{item.oraInizio}-{item.oraFine}</span>
+                                              ) : null}
+
+                                              {!item.isDistinta && (
+                                                  <span className="text-[9px] font-mono font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 shrink-0">BI:{item.numeroBi}</span>
                                               )}
                                               
-                                              <span className={`text-[11px] font-bold truncate ${item.isPregresso || item.isDistinta ? 'text-slate-600' : 'text-slate-900'}`}>{item.nome}</span>
+                                              <span className="text-xs font-extrabold text-slate-900 truncate">{item.nome}</span>
                                               
-                                              {item.resoEstintori && <span className="text-orange-500 shrink-0" title="Reso Estintori"><AlertTriangle size={12}/></span>}
-                                              {item.haInsoluto && <span className="text-red-500 shrink-0" title="Insoluto"><AlertCircle size={12}/></span>}
+                                              {item.resoEstintori && <span className="bg-amber-100 text-amber-800 text-[9px] font-extrabold px-1.5 py-0.5 rounded shrink-0">SOS</span>}
+                                              {item.haInsoluto && <span className="bg-red-100 text-red-800 text-[9px] font-extrabold px-1.5 py-0.5 rounded shrink-0">INS</span>}
                                           </div>
                                           
-                                          <div className="flex items-center justify-between mt-0.5 opacity-70">
-                                              <span className="text-[9px] font-medium text-slate-500 truncate w-2/3">
-                                                  {item.indirizzo}, {item.localita}
+                                          <div className="flex items-center justify-between mt-1">
+                                              <span className="text-[10px] font-medium text-slate-500 truncate pr-2">
+                                                  <MapPin size={10} className="inline mr-1 text-slate-400"/>
+                                                  {item.indirizzo}{item.localita ? `, ${item.localita}` : ""}
                                               </span>
                                               {!item.isPregresso && !item.isDistinta && (
-                                                  <span className="text-[9px] font-bold text-slate-500 shrink-0">
+                                                  <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded shrink-0">
                                                       {item.minutiLavoro}m
                                                   </span>
                                               )}
                                           </div>
                                       </div>
 
-                                      <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      {/* BOTTONI AZIONE SEMPRE VISIBILI E COMODI */}
+                                      <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                                           {!item.isPregresso && !item.isDistinta && (
                                               <div className="relative">
-                                                  <button onClick={(e) => { e.stopPropagation(); setMenuAperto(menuAperto === item.codice ? null : item.codice); }} className="text-slate-500 hover:text-slate-900 p-1.5 rounded-md hover:bg-slate-100 transition-colors cursor-pointer bg-white shadow-sm border border-slate-200">
-                                                      <ArrowRightLeft size={12}/>
+                                                  <button onClick={(e) => { e.stopPropagation(); setMenuAperto(menuAperto === item.codice ? null : item.codice); }} title="Sposta in un altro giorno" className="text-slate-600 hover:text-blue-600 p-1.5 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer bg-slate-50 border border-slate-200">
+                                                      <ArrowRightLeft size={13}/>
                                                   </button>
                                                   {menuAperto === item.codice && (
-                                                      <div className="absolute top-full right-0 mt-1 bg-white border border-slate-200 shadow-xl rounded-lg p-1 z-[99] w-32">
-                                                          <div className="text-[9px] font-bold text-slate-400 px-2 py-1 uppercase">Sposta a...</div>
+                                                      <div className="absolute top-full right-0 mt-1 bg-white border border-slate-200 shadow-2xl rounded-xl p-1.5 z-[99] w-36">
+                                                          <div className="text-[9px] font-extrabold text-slate-400 px-2 py-1 uppercase">Sposta a...</div>
                                                           {giornateStats.map(gs => (
-                                                              <button key={gs.dataStr} onClick={(e) => { e.stopPropagation(); spostaCantiereRapido(item.codice, gs.dataStr); }} className="w-full text-left px-2 py-1.5 text-[10px] font-bold text-slate-700 hover:bg-slate-50 rounded transition-colors cursor-pointer">
+                                                              <button key={gs.dataStr} onClick={(e) => { e.stopPropagation(); spostaCantiereRapido(item.codice, gs.dataStr); }} className="w-full text-left px-2 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-lg transition-colors cursor-pointer">
                                                                   {gs.nomeGiorno} {formattaDataVisuale(gs.dataStr).slice(0,5)}
                                                               </button>
                                                           ))}
-                                                          <div className="border-t border-slate-100 my-1"></div>
-                                                          <button onClick={(e) => { e.stopPropagation(); spostaCantiereRapido(item.codice, null); }} className="w-full text-left px-2 py-1.5 text-[10px] font-bold text-slate-700 hover:bg-slate-50 rounded transition-colors cursor-pointer">
-                                                              Sospesi
-                                                          </button>
+                                                          {giornoSceltoFiltro !== "sospesi" && (
+                                                              <>
+                                                                  <div className="border-t border-slate-100 my-1"></div>
+                                                                  <button onClick={(e) => { e.stopPropagation(); spostaCantiereRapido(item.codice, null); }} className="w-full text-left px-2 py-1.5 text-[11px] font-bold text-amber-700 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer">
+                                                                      ⏸ Manda in Sospesi
+                                                                  </button>
+                                                              </>
+                                                          )}
                                                       </div>
                                                   )}
                                               </div>
                                           )}
-                                          <button onClick={(e) => { e.stopPropagation(); setClienteSelezionatoScheda(item); }} className="text-slate-500 hover:text-slate-900 p-1.5 rounded-md hover:bg-slate-100 transition-colors cursor-pointer bg-white shadow-sm border border-slate-200">
-                                              <FileText size={12}/>
+                                          <button onClick={(e) => { e.stopPropagation(); setClienteSelezionatoScheda(item); }} title="Apri scheda dettagli" className="text-slate-600 hover:text-blue-600 p-1.5 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer bg-slate-50 border border-slate-200">
+                                              <FileText size={13}/>
                                           </button>
                                       </div>
                                   </div>
@@ -1805,16 +1898,18 @@ Tecnico: ${tecnicoNome}`;
                       </div>
                   </div>
 
-                  <div className="hidden md:block flex-1 bg-slate-100 relative z-0 border-t border-slate-200">
+                  {/* PANNELLO DESTRO: MAPPA GIGANTE AFFIANCATA */}
+                  <div className="hidden md:block flex-1 bg-slate-100 relative z-0">
                       {leafletLoaded ? (
-                          <MapContainer key={giornoSceltoFiltro} center={[SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG]} zoom={12} style={{ height: "100%", width: "100%" }}>
-                              <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
+                          <MapContainer key={giornoSceltoFiltro} center={[SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG]} zoom={11} style={{ height: "100%", width: "100%" }}>
+                              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                               {listaAttiva.filter(i => i.lat && i.lng && !i.isDistinta).map((c, idx) => (
                                   <Marker key={c.codice} position={[c.lat, c.lng]} icon={createNumberedIcon(idx + (listaAttiva[0]?.isDistinta ? 0 : 1))}>
                                       <Popup>
                                           <div className="p-1">
                                               <p className="font-bold text-xs text-slate-900">{c.nome}</p>
-                                              <p className="text-[10px] text-slate-500">{c.oraInizio} - {c.minutiLavoro}m</p>
+                                              <p className="text-[10px] text-slate-600">{c.indirizzo}, {c.localita}</p>
+                                              <p className="text-[10px] font-mono font-bold text-blue-600 mt-1">{c.oraInizio || "Sospeso"} ({c.minutiLavoro}m)</p>
                                           </div>
                                       </Popup>
                                   </Marker>
@@ -1828,63 +1923,71 @@ Tecnico: ${tecnicoNome}`;
                   </div>
               </div>
           ) : (
-              <div className="flex-1 overflow-y-auto bg-slate-50 p-8 flex flex-col items-center justify-center">
-                  <div className="max-w-3xl w-full">
-                      
-                      <div className="text-center mb-10">
-                          <div className="w-20 h-20 bg-white shadow-sm border border-slate-200 rounded-2xl flex items-center justify-center mx-auto mb-6">
-                              <Map size={36} className="text-slate-800" />
+              /* SCHERMATA INIZIALE RICCA QUANDO NESSUN FILE È ANCORA ELABORATO */
+              <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-center">
+                  <div className="max-w-4xl w-full">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
+                          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs relative overflow-hidden">
+                              <div className="p-3 bg-blue-50 text-blue-600 rounded-xl inline-block mb-3"><Calendar size={24}/></div>
+                              <span className="bg-blue-100 text-blue-800 font-extrabold text-[10px] px-2.5 py-1 rounded-md ml-2 uppercase">1. Periodo & Tecnico</span>
+                              <h3 className="font-extrabold text-slate-900 text-base mb-1">Imposta la Settimana</h3>
+                              <p className="text-xs text-slate-500 leading-relaxed">Configura nella barra qui sopra i giorni lavorativi attivi e seleziona il tecnico di riferimento.</p>
                           </div>
-                          <h2 className="text-2xl font-extrabold text-slate-900 mb-3">Plancia Operativa in Attesa</h2>
-                          <p className="text-sm text-slate-500 max-w-lg mx-auto">
-                              Il sistema multi-agente è pronto. Completa i passaggi per avviare il motore logistico e generare i fogli di viaggio della settimana.
-                          </p>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-                          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
-                              <div className="absolute top-0 right-0 p-4 opacity-10"><UserCheck size={64}/></div>
-                              <span className="bg-slate-100 text-slate-600 font-bold text-[10px] px-2 py-1 rounded mb-4 inline-block">PASSO 1</span>
-                              <h3 className="font-extrabold text-slate-900 mb-2">Imposta Variabili</h3>
-                              <p className="text-xs text-slate-500">Seleziona il tecnico dal menu in alto e verifica le date della settimana lavorativa.</p>
+                          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs relative overflow-hidden">
+                              <div className="p-3 bg-amber-50 text-amber-600 rounded-xl inline-block mb-3"><FileUp size={24}/></div>
+                              <span className="bg-amber-100 text-amber-800 font-extrabold text-[10px] px-2.5 py-1 rounded-md ml-2 uppercase">2. Caricamento Dati</span>
+                              <h3 className="font-extrabold text-slate-900 text-base mb-1">Importa il File Cantieri</h3>
+                              <p className="text-xs text-slate-500 leading-relaxed">Clicca su <strong>Sfoglia Excel</strong>. Il sistema raggrupperà i cantieri per BI univoco senza perdere nessuna sede.</p>
                           </div>
-                          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
-                              <div className="absolute top-0 right-0 p-4 opacity-10"><FileUp size={64}/></div>
-                              <span className="bg-slate-100 text-slate-600 font-bold text-[10px] px-2 py-1 rounded mb-4 inline-block">PASSO 2</span>
-                              <h3 className="font-extrabold text-slate-900 mb-2">Carica l'Estrazione</h3>
-                              <p className="text-xs text-slate-500">Usa il bottone "Carica Excel" per importare i cantieri da eseguire.</p>
+                          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs relative overflow-hidden">
+                              <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl inline-block mb-3"><Sliders size={24}/></div>
+                              <span className="bg-emerald-100 text-emerald-800 font-extrabold text-[10px] px-2.5 py-1 rounded-md ml-2 uppercase">3. Multi-Agente IA</span>
+                              <h3 className="font-extrabold text-slate-900 text-base mb-1">Genera Plancia & Mappa</h3>
+                              <p className="text-xs text-slate-500 leading-relaxed">Premi <strong>Genera Plancia</strong>: Cartografo, Cronometrista e Supervisore creeranno i giri ottimali.</p>
                           </div>
-                          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
-                              <div className="absolute top-0 right-0 p-4 opacity-10"><Sliders size={64}/></div>
-                              <span className="bg-slate-100 text-slate-600 font-bold text-[10px] px-2 py-1 rounded mb-4 inline-block">PASSO 3</span>
-                              <h3 className="font-extrabold text-slate-900 mb-2">Avvia il Motore IA</h3>
-                              <p className="text-xs text-slate-500">Clicca su "Genera Rotte". L'IA raggrupperà le zone e incastrerà gli orari attorno ai pregressi.</p>
-                          </div>
-                      </div>
-
-                      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex items-center justify-between">
-                          <div className="flex items-center gap-4">
-                              <div className={`p-3 rounded-xl ${googleToken ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
-                                  <Calendar size={24}/>
-                              </div>
-                              <div>
-                                  <h4 className="font-bold text-sm text-slate-900">Connessione Google Calendar</h4>
-                                  <p className="text-xs text-slate-500 mt-0.5">{googleToken ? 'Connesso e pronto a sincronizzare i pregressi.' : 'Non connesso. Richiesto per elaborare le rotte.'}</p>
-                              </div>
-                          </div>
-                          {!googleToken && (
-                              <button onClick={eseguiLoginGoogle} className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-bold shadow-sm text-xs transition-colors">
-                                  Connetti Ora
-                              </button>
-                          )}
                       </div>
                   </div>
               </div>
           )}
       </div>
 
+      {/* MODALE PIANIFICA SOSPESO SINGOLO */}
+      {sospesoInModifica && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[9999] flex items-center justify-center p-4 print:hidden">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-8 relative border border-slate-200">
+            <button onClick={() => setSospesoInModifica(null)} className="absolute top-6 right-6 text-slate-400 bg-slate-100 p-2 rounded-full hover:bg-slate-200"><X size={18} /></button>
+            <div className="mb-6">
+               <div className="p-3 bg-amber-100 text-amber-600 rounded-xl inline-block mb-4"><PauseCircle size={24} /></div>
+               <h2 className="text-xl font-extrabold text-slate-900 leading-tight">Pianifica Sospeso</h2>
+               <p className="text-xs text-slate-500 mt-1">{sospesoInModifica.nome}</p>
+            </div>
+            <div className="flex flex-col gap-4 mb-6">
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 block mb-1">Data assegnazione</label>
+                <input type="date" value={configSospesoSingolo.data} onChange={(e) => setConfigSospesoSingolo({...configSospesoSingolo, data: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-semibold text-slate-800 focus:outline-none" />
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 block mb-1">Ora Inizio stimata</label>
+                <input type="time" value={configSospesoSingolo.oraInizio} onChange={(e) => setConfigSospesoSingolo({...configSospesoSingolo, oraInizio: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-semibold text-slate-800 focus:outline-none" />
+              </div>
+            </div>
+            <div className="flex flex-col gap-2.5">
+               <button onClick={() => creaSospesoDaModale('calendar')} disabled={creazioneInCorso[sospesoInModifica.codice]} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 shadow-md transition-all">
+                  {creazioneInCorso[sospesoInModifica.codice] ? (
+                    <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin"/> Invio in corso...</span>
+                  ) : (
+                    <span className="flex items-center gap-2"><CalendarPlus size={16}/> Crea su Calendar</span>
+                  )}
+               </button>
+               <button onClick={() => creaSospesoDaModale('lista')} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-3.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all"><CheckSquare size={16}/> Aggiungi solo in Lista</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE DETTAGLIO SCHEDA CLIENTE */}
       {clienteSelezionatoScheda && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 overflow-y-auto">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 overflow-y-auto print:hidden">
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8 relative border border-slate-200 my-auto max-h-[90vh] flex flex-col">
             <button onClick={() => setClienteSelezionatoScheda(null)} className="absolute top-6 right-6 text-slate-400 bg-slate-50 border border-slate-200 p-2 rounded-full hover:bg-slate-100 hover:text-slate-900 transition-colors"><X size={18} /></button>
             
@@ -1949,24 +2052,90 @@ Tecnico: ${tecnicoNome}`;
         </div>
       )}
 
+      {/* VISTA STAMPA FOGLIO DI VIAGGIO */}
+      <div className="hidden print:block w-full text-black bg-white font-sans text-sm p-6">
+         {giorniVisibiliPerStampa.map((dataStr: any) => {
+            const interventiGiorno = interventiGrezzi.filter(i => i.dataAssegnata === dataStr && (i.selezionatoPerGiro || i.isPregresso));
+            if (interventiGiorno.length === 0) return null;
+
+            const distinta = interventiGiorno.find(i => i.isDistinta);
+            const lavori = interventiGiorno.filter(i => !i.isDistinta).sort((a,b) => (a.oraInizio || "").localeCompare(b.oraInizio || ""));
+            const nomeGiorno = getNomeGiorno(dataStr);
+
+            return (
+               <div key={dataStr} className="break-after-page mb-10">
+                  <div className="border-b-2 border-black pb-3 mb-6 flex justify-between items-end">
+                     <div>
+                       <h1 className="text-2xl font-extrabold uppercase tracking-tight">FOGLIO DI VIAGGIO</h1>
+                       <p className="text-gray-600 font-bold mt-1 uppercase">{nomeGiorno} {formattaDataVisuale(dataStr)}</p>
+                     </div>
+                     <div className="text-right">
+                       <p className="text-xs uppercase text-gray-500 font-bold mb-1">Tecnico Assegnato</p>
+                       <p className="text-lg font-extrabold">{tecnicoSelezionato.nome}</p>
+                     </div>
+                  </div>
+
+                  {distinta && (
+                    <div className="mb-6 p-4 border border-black bg-gray-50 rounded-lg">
+                       <h2 className="font-extrabold text-base mb-2 uppercase flex items-center gap-2"><Package size={18} /> Distinta di Carico Magazzino</h2>
+                       <pre className="font-mono text-xs whitespace-pre-wrap">{distinta.descrizioneDistinta}</pre>
+                    </div>
+                  )}
+
+                  <div className="mt-4">
+                     <h2 className="font-extrabold text-base mb-3 uppercase border-b border-black pb-1">Elenco Interventi Giornalieri</h2>
+                     <table className="w-full text-left text-xs border-collapse border border-black">
+                        <thead>
+                           <tr className="bg-gray-100 border-b border-black">
+                              <th className="p-2 border border-black w-24">Orario</th>
+                              <th className="p-2 border border-black w-48">Riferimento BI & Cliente</th>
+                              <th className="p-2 border border-black">Indirizzo & Località</th>
+                              <th className="p-2 border border-black">Attrezzature / Note</th>
+                           </tr>
+                        </thead>
+                        <tbody>
+                           {lavori.map((lav, idx) => (
+                              <tr key={idx} className="border-b border-black">
+                                 <td className="p-2 border border-black font-mono font-bold align-top">{lav.oraInizio} - {lav.oraFine}</td>
+                                 <td className="p-2 border border-black font-bold align-top">
+                                    {lav.nome}
+                                    <span className="block font-mono font-normal text-[10px] text-gray-600 mt-0.5">BI: {lav.numeroBi}</span>
+                                 </td>
+                                 <td className="p-2 border border-black align-top">{lav.indirizzo} {lav.localita ? `- ${lav.localita}` : ""}</td>
+                                 <td className="p-2 border border-black align-top text-[11px]">
+                                    {lav.dettaglioAttrezzature && lav.dettaglioAttrezzature.length > 0 
+                                       ? lav.dettaglioAttrezzature.map((d: any) => `${d.descrizione}: ${d.quantita}`).join(", ") 
+                                       : "Verifica standard"}
+                                 </td>
+                              </tr>
+                           ))}
+                        </tbody>
+                     </table>
+                  </div>
+               </div>
+            );
+         })}
+      </div>
+
+      {/* CHAT IA FLUTTUANTE */}
       <button
         onClick={() => setIsChatOpen(!isChatOpen)}
         className={`fixed bottom-6 right-6 z-[100] w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-all duration-300 print:hidden ${
-          isChatOpen ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-white text-slate-900 border border-slate-200 hover:bg-slate-50'
+          isChatOpen ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-blue-600 text-white hover:bg-blue-700'
         }`}
       >
         {isChatOpen ? <X size={24} /> : <MessageSquare size={24} className={chatLoading ? 'animate-pulse' : ''} />}
       </button>
 
       <div 
-        className={`fixed bottom-24 right-6 z-[90] w-[340px] h-[500px] max-h-[70vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden transition-all duration-300 origin-bottom-right print:hidden ${
+        className={`fixed bottom-24 right-6 z-[90] w-[350px] h-[500px] max-h-[70vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden transition-all duration-300 origin-bottom-right print:hidden ${
           isChatOpen ? 'scale-100 opacity-100 translate-y-0' : 'scale-95 opacity-0 translate-y-8 pointer-events-none'
         }`}
       >
         <div className="p-4 bg-slate-900 text-white flex justify-between items-center shrink-0">
           <div className="flex items-center gap-2">
-            <Zap size={16} className="text-slate-300" />
-            <h3 className="font-bold text-xs tracking-wide">Assistente IA</h3>
+            <Zap size={16} className="text-blue-400" />
+            <h3 className="font-bold text-xs tracking-wide">Assistente IA Operativo</h3>
           </div>
           <button onClick={() => setIsChatOpen(false)} className="text-slate-400 hover:text-white transition-colors"><X size={16} /></button>
         </div>
@@ -1974,9 +2143,9 @@ Tecnico: ${tecnicoNome}`;
         <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50 custom-scrollbar">
           {messages.map((msg, idx) => (
             <div key={idx} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] px-3 py-2 text-xs leading-relaxed shadow-sm ${
+              <div className={`max-w-[85%] px-3 py-2 text-xs leading-relaxed shadow-xs ${
                 msg.sender === 'user' 
-                  ? 'bg-slate-900 text-white rounded-xl rounded-br-sm' 
+                  ? 'bg-blue-600 text-white rounded-xl rounded-br-sm' 
                   : 'bg-white text-slate-700 border border-slate-200 rounded-xl rounded-bl-sm'
               }`}>
                 {msg.text}
@@ -1985,8 +2154,8 @@ Tecnico: ${tecnicoNome}`;
           ))}
           {chatLoading && (
             <div className="flex justify-start">
-              <div className="bg-white text-slate-500 border border-slate-200 px-3 py-2 rounded-xl rounded-bl-sm text-xs shadow-sm flex items-center gap-2">
-                <Loader2 size={12} className="animate-spin text-slate-900" /> Elaborazione...
+              <div className="bg-white text-slate-500 border border-slate-200 px-3 py-2 rounded-xl rounded-bl-sm text-xs shadow-xs flex items-center gap-2">
+                <Loader2 size={12} className="animate-spin text-blue-600" /> Elaborazione...
               </div>
             </div>
           )}
@@ -1999,9 +2168,9 @@ Tecnico: ${tecnicoNome}`;
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
             placeholder="Es. Sposta Rossi a giovedì..."
-            className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400 transition-colors"
+            className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-blue-500 transition-colors"
           />
-          <button type="submit" disabled={chatLoading} className="bg-slate-900 hover:bg-slate-800 text-white px-3 py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 shrink-0">
+          <button type="submit" disabled={chatLoading} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 shrink-0">
             Invia
           </button>
         </form>
