@@ -4,22 +4,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 const apiKey = process.env.GEMINI_API_KEY || "";
 const genAI = new GoogleGenerativeAI(apiKey);
 
-// Funzione per l'estrazione sicura del JSON dalle risposte dell'IA
-function extractJSON(testo: string) {
-  const firstBrace = testo.indexOf('{');
-  const lastBrace = testo.lastIndexOf('}');
-  if (firstBrace === -1 || lastBrace === -1) {
-      // Se non trova graffe, prova con le parentesi quadre (per il Cartografo)
-      const firstSquare = testo.indexOf('[');
-      const lastSquare = testo.lastIndexOf(']');
-      if (firstSquare !== -1 && lastSquare !== -1) {
-          return JSON.parse(testo.slice(firstSquare, lastSquare + 1));
-      }
-      throw new Error("Nessun JSON valido trovato nella risposta IA.");
-  }
-  return JSON.parse(testo.slice(firstBrace, lastBrace + 1));
-}
-
+// Funzione di utilità per riprovare in caso di sovraccarico temporaneo dei server Google
 async function generateWithRetry(model: any, contents: any, retries = 3, delay = 2000): Promise<any> {
   for (let i = 0; i < retries; i++) {
     try {
@@ -45,10 +30,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "API Key mancante nel file .env.local" }, { status: 500 });
     }
 
-    // Usiamo il modello veloce per non far aspettare 1 minuto all'utente con 3 chiamate
+    // 1. IL GUINZAGLIO STRUTTURALE: Modello Flash bloccato in modalità JSON puro a creatività zero
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-4-argon",
-      generationConfig: { temperature: 0.1 }
+      model: "gemini-4-flash", 
+      generationConfig: { 
+        temperature: 0.0, // Zero creatività, massima precisione matematica
+        responseMimeType: "application/json" // IMPEDISCE ERRORI DI SINTASSI (Niente Markdown, niente testo libero)
+      }
     });
 
     if (action === 'pianifica_settimana') {
@@ -56,115 +44,106 @@ export async function POST(request: Request) {
       // ==========================================
       // AGENTE 1: IL CARTOGRAFO
       // ==========================================
-      const promptCartografo = `Sei l'Agente Cartografo di Asso Antincendio.
-Il tuo UNICO compito è prendere i cantieri in ingresso e raggrupparli in "Zone/Direttrici" geografiche logiche in base a CAP e Località (es. Val Polcevera, Centro, Levante, Ponente, Entroterra).
-Ignora completamente gli orari, le date o la durata degli interventi. Fai solo clustering geografico.
-
-RESTITUISCI ESCLUSIVAMENTE un array JSON puro, senza markdown, con questa struttura:
-[
-  { "zona": "Genova Ponente", "codici": ["CLI_123_Via...", "BI_456"] },
-  { "zona": "Val Scrivia", "codici": ["BI_789"] }
-]
-
-CANTIERI DA CLUSTERIZZARE:
-${JSON.stringify(data.interventi.map((c: any) => ({ codice: c.codice, indirizzo: c.indirizzo, localita: c.localita })), null, 2)}`;
+      const promptCartografo = `Sei l'Agente Cartografo. Raggruppa i cantieri per CAP/Località. Non mischiare Levante e Ponente nello stesso gruppo.
+Devi restituire ESCLUSIVAMENTE un JSON valido con questa struttura esatta (rispetta rigorosamente le chiavi):
+{
+  "ragionamento_cartografo": "Spiega brevemente come hai diviso le zone (es. Genova Est vs Ponente)",
+  "cluster": [
+    { "zona": "Nome Zona", "codici": ["codice1", "codice2"] }
+  ]
+}
+CANTIERI: ${JSON.stringify(data.interventi.map((c: any) => ({ codice: c.codice, indirizzo: c.indirizzo, localita: c.localita })))}`;
 
       const resCartografo = await generateWithRetry(model, [{ text: promptCartografo }]);
-      const clusterGeografici = extractJSON(resCartografo.response.text());
-      console.log("✅ Agente 1 (Cartografo) completato.");
+      const cartografoOutput = JSON.parse(resCartografo.response.text());
+      const clusterGeografici = cartografoOutput.cluster;
+      console.log("✅ Agente 1 (Cartografo) completato:", cartografoOutput.ragionamento_cartografo);
 
 
       // ==========================================
       // AGENTE 2: IL CRONOMETRISTA
       // ==========================================
-      const promptCronometrista = `Sei l'Agente Cronometrista di Asso Antincendio.
-Hai ricevuto i raggruppamenti geografici dal Cartografo e le giornate disponibili (con i relativi impegni PREGRESSI TASSATIVI di Google Calendar).
+      const promptCronometrista = `Sei l'Agente Cronometrista. Assegna i cluster geografici ai giorni della settimana per creare il piano di lavoro.
+REGOLE TASSATIVE:
+1. I codici che iniziano con PREGRESSO_ (es. PREGRESSO_123) sono inamovibili (appuntamenti fissi) e vanno lasciati nel giorno e nell'ordine corretto.
+2. REGOLA DEL MATTINO: Se un giorno contiene un PREGRESSO al pomeriggio (es. alle 14:00 o alle 15:00), è severamente vietato lasciare la mattina di quel giorno vuota. Inserisci altri cantieri dello stesso cluster PRIMA del PREGRESSO.
+3. I cantieri molto lunghi (> 300 min) vanno messi come primo intervento della giornata.
 
-REGOLE DI INCASTRO (TIME-BLOCKING):
-1. Riempi i giorni assegnando interi "Cluster Geografici" (non mischiare zone opposte nello stesso giorno).
-2. I PREGRESSI (es. PREGRESSO_123) sono scogli fissi. 
-3. LA REGOLA D'ORO DEL MATTINO: Se in una giornata c'è un PREGRESSO al pomeriggio (es. alle 14:00), è SEVERAMENTE VIETATO lasciare la giornata vuota prima di quell'orario. Devi obbligatoriamente assegnare al mattino dei cantieri della stessa zona (o di strada).
-4. Cantieri lunghi (> 300 minuti) vanno messi sempre come primo intervento della giornata.
-5. Inserisci i PREGRESSI nell'ordine corretto all'interno dell'array (se è al pomeriggio, mettilo dopo i cantieri del mattino).
-
-RESTITUISCI ESCLUSIVAMENTE un oggetto JSON puro, senza markdown:
+Devi restituire ESCLUSIVAMENTE un JSON valido con questa struttura esatta:
 {
-  "giorni": {
-    "2026-10-05": ["codiceCliente1", "codiceCliente2", "PREGRESSO_abc", "codiceCliente3"]
-  },
-  "sospesi": ["codiceCliente4"]
+  "ragionamento_incastri": "Spiega come hai posizionato i cantieri, specie attorno ai pregressi",
+  "giorni": { "2026-10-05": ["cod_1", "PREGRESSO_abc", "cod_2"] },
+  "sospesi": ["cod_scartato"]
 }
-
-DATI DA ELABORARE:
-Cluster Geografici: ${JSON.stringify(clusterGeografici)}
-Giornate e Pregressi: ${JSON.stringify(data.giornate)}
-Tutti i cantieri (con durate): ${JSON.stringify(data.interventi)}`;
+CLUSTER RICEVUTI: ${JSON.stringify(clusterGeografici)}
+GIORNATE E PREGRESSI: ${JSON.stringify(data.giornate)}
+CANTIERI (con durate per incastrarli): ${JSON.stringify(data.interventi)}`;
 
       const resCronometrista = await generateWithRetry(model, [{ text: promptCronometrista }]);
-      const bozzaPiano = extractJSON(resCronometrista.response.text());
-      console.log("✅ Agente 2 (Cronometrista) completato.");
+      const bozzaPiano = JSON.parse(resCronometrista.response.text());
+      console.log("✅ Agente 2 (Cronometrista) completato:", bozzaPiano.ragionamento_incastri);
 
 
       // ==========================================
       // AGENTE 3: IL SUPERVISORE
       // ==========================================
-      const promptSupervisore = `Sei il Supervisore Logistico Finale di Asso Antincendio.
-Stai analizzando la bozza del piano logistico generato dal tuo sottoposto. Il tuo compito è trovare e correggere i suoi errori prima della consegna definitiva.
+      const promptSupervisore = `Sei il Supervisore Finale. Correggi la bozza del piano logistico prima della consegna.
+CHECKLIST OBBLIGATORIA:
+1. Controlla le mattine: l'agente precedente ha lasciato vuota la mattina di un giorno che ha un PREGRESSO pomeridiano? Se sì, sei obbligato a prendere un cantiere affine dai "sospesi" e inserirlo prima del PREGRESSO.
+2. Controlla il carico: se la somma dei minuti di un giorno supera i 480/500 minuti (più i viaggi), sposta l'ultimo cantiere di quell'array nella lista "sospesi".
+3. Intoccabilità: Non rimuovere né spostare di giorno i codici PREGRESSO_*.
 
-CHECKLIST DI CORREZIONE:
-1. Ha lasciato dei buchi enormi al mattino prima di un tassativo pomeridiano?
-   - CORREZIONE: Cerca nei "sospesi" dei cantieri di strada o della stessa zona e infilali al mattino prima del PREGRESSO.
-2. Ha sovraccaricato una singola giornata? (Considera un limite di circa 480 minuti effettivi di lavoro per tecnico al giorno, più i viaggi).
-   - CORREZIONE: Se una giornata è palesemente troppo piena (> 6 interventi lunghi), togli l'ultimo dell'array e spostalo nei "sospesi".
-3. Ha dimenticato i PREGRESSI? Controlla che tutti i codici che iniziano per PREGRESSO_ siano ancora nel loro giorno corretto. NON rimuovere o spostare di giorno i pregressi.
-
-RESTITUISCI ESCLUSIVAMENTE l'oggetto JSON FINALE CORRETTO, senza markdown, con questa struttura:
+Devi restituire ESCLUSIVAMENTE un JSON valido con questa struttura esatta:
 {
-  "giorni": {
-    "2026-10-05": ["codiceCorretto1", "PREGRESSO_abc"]
-  },
-  "sospesi": ["codiceCorretto4"]
+  "ragionamento_buchi": "Spiega se hai trovato e tappato buchi mattutini",
+  "ragionamento_overtime": "Spiega se hai rimosso cantieri per limiti orari eccessivi",
+  "giorni": { "2026-10-05": ["cod_corretto1", "PREGRESSO_abc"] },
+  "sospesi": ["cod_finale1"]
 }
-
-BOZZA DA REVISIONARE:
-${JSON.stringify(bozzaPiano)}
-
-DATI EXTRA PER LA REVISIONE:
-Giornate originali: ${JSON.stringify(data.giornate)}
-Tutti i cantieri: ${JSON.stringify(data.interventi)}`;
+BOZZA DA REVISIONARE: ${JSON.stringify({ giorni: bozzaPiano.giorni, sospesi: bozzaPiano.sospesi })}`;
 
       const resSupervisore = await generateWithRetry(model, [{ text: promptSupervisore }]);
-      const pianoFinale = extractJSON(resSupervisore.response.text());
-      console.log("✅ Agente 3 (Supervisore) completato. Piano generato.");
+      const pianoFinale = JSON.parse(resSupervisore.response.text());
+      console.log("✅ Agente 3 (Supervisore) completato. Piano approvato.");
 
-      return NextResponse.json({ success: true, piano: pianoFinale });
+      // Restituiamo solo gli array puliti al frontend (nascondendo i ragionamenti all'interfaccia React)
+      return NextResponse.json({ success: true, piano: { giorni: pianoFinale.giorni, sospesi: pianoFinale.sospesi } });
     }
 
     if (action === 'modifica_chat') {
-      const systemPrompt = `Sei l'Assistente Operativo di Asso Antincendio. Devi analizzare il comando dell'utente e applicare le modifiche alla plancia attuale.
-Ricorda: l'ordine degli array indica il percorso (da inizio a fine giornata). I PREGRESSO_... sono ancore inamovibili. I cantieri tolti da un giorno vanno messi in "sospesi".
+      
+      let historyTestuale = "";
+      if (history && history.length > 0) {
+        historyTestuale = "CRONOLOGIA DELLA CHAT FINORA:\n";
+        history.forEach((msg: any) => {
+          historyTestuale += `${msg.role === 'user' ? 'UTENTE' : 'ASSISTENTE'}: ${msg.text}\n`;
+        });
+      }
 
-STATO LOGISTICO ATTUALE (DA MODIFICARE):
-${JSON.stringify(statoAttuale, null, 2)}
+      const systemPrompt = `Sei l'Assistente Operativo in Chat. Applica il comando logistico richiesto dall'utente sulla plancia.
+REGOLE: 
+- L'ordine degli ID nell'array rappresenta la sequenza temporale. I PREGRESSO_... sono ancore fisse. 
+- I cantieri tolti da un giorno e non riassegnati vanno messi nell'array "sospesi".
 
-RESTITUISCI ESCLUSIVAMENTE UN JSON PURO (Niente markdown):
+Devi restituire ESCLUSIVAMENTE un JSON valido con questa struttura esatta:
 {
-  "messaggioChat": "Capo, ho spostato il cantiere come richiesto...",
+  "ragionamento_operazione": "Spiega logicamente la modifica applicata",
+  "messaggioChat": "Capo, ho spostato il cantiere a giovedì come richiesto...",
   "piano": {
-    "giorni": { "2026-10-05": ["codice1"] },
-    "sospesi": ["codice3"]
+    "giorni": { "2026-10-05": ["cod1"] },
+    "sospesi": ["cod2"]
   }
 }
-Comando dell'utente: "${comandoUtente}"`;
+${historyTestuale}
+STATO ATTUALE: ${JSON.stringify(statoAttuale)}
+COMANDO UTENTE: "${comandoUtente}"`;
 
       const result = await generateWithRetry(model, [{ text: systemPrompt }]);
-      const parsedOutput = extractJSON(result.response.text());
-
-      if (!parsedOutput.piano) parsedOutput.piano = { giorni: {}, sospesi: [] };
+      const parsedOutput = JSON.parse(result.response.text());
 
       return NextResponse.json({ 
         success: true, 
-        piano: parsedOutput.piano, 
+        piano: parsedOutput.piano || { giorni: {}, sospesi: [] }, 
         messaggioChat: parsedOutput.messaggioChat || "Ho aggiornato la plancia operativa."
       });
     }
