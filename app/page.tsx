@@ -728,22 +728,39 @@ Tecnico: ${tecnicoNome}`;
     impegniEsistenti.forEach(evt => { tuttiIBiGiaInCalendario = [...tuttiIBiGiaInCalendario, ...evt.numeriBiRilevati]; });
 
     setProgressIA({ active: true, percent: 30, text: "Analisi foglio Excel e anagrafiche Rubrica..." });
+    
+    let righeScartate = 0; // Contatore per il nuovo audit
+
     for (const riga of righe) {
       const nomeCliente = (riga.desclifor || "").toUpperCase();
-      if (!nomeCliente) continue;
+      if (!nomeCliente) {
+         righeScartate++;
+         continue; 
+      }
 
-      const numeroBi = String(riga.numdoc || riga.nrob || riga.id_bi || riga.documento || riga.codicebi || "BI-GENERICA").trim();
+      const numeroBi = String(riga.numdoc || riga.nrob || riga.id_bi || riga.documento || riga.codicebi || "").trim();
       const codPerRubrica = riga.codclifor ? String(riga.codclifor).trim() : "";
-      const idCliente = riga.codclifor || riga.desclifor || Math.random().toString();
+      
+      // IL NUOVO CERVELLO DI RAGGRUPPAMENTO: Non più per cliente, ma per BI univoco o Indirizzo!
+      let idUnivocoCantiere = "";
+      if (numeroBi && numeroBi !== "0" && numeroBi !== "-") {
+          idUnivocoCantiere = `BI_${numeroBi}`;
+      } else {
+          // Se non ha un BI, lo raggruppiamo per Cliente + Indirizzo per non fondere cantieri diversi
+          const ind = riga.indirizzo || riga.INDIRIZZO || "NoInd";
+          idUnivocoCantiere = `CLI_${codPerRubrica}_${ind}`;
+      }
 
       const datiRubrica = rubricaClienti[codPerRubrica] || {};
       const telDaUsare = datiRubrica.cellulare || datiRubrica.telefono || riga.telefono || riga.TELEFONO || riga.tel || riga.TEL || "";
       const emailDaUsare = datiRubrica.email || riga.email || riga.EMAIL || riga['e-mail'] || "";
       const contattoDaUsare = datiRubrica.contatto || "";
 
-      if (!clientiMappa.has(idCliente)) {
-        clientiMappa.set(idCliente, {
-          codice: idCliente, numeroBi, nome: riga.desclifor || "Sconosciuto",
+      if (!clientiMappa.has(idUnivocoCantiere)) {
+        clientiMappa.set(idUnivocoCantiere, {
+          codice: idUnivocoCantiere, 
+          numeroBi: numeroBi || "BI-GENERICA", 
+          nome: riga.desclifor || "Sconosciuto",
           indirizzo: riga.indirizzo || riga.INDIRIZZO || "", 
           localita: riga.localita || riga.LOCALITA || "",
           cap: riga.cap || riga.CAP || "",
@@ -753,7 +770,7 @@ Tecnico: ${tecnicoNome}`;
         });
       }
 
-      const cliente = clientiMappa.get(idCliente);
+      const cliente = clientiMappa.get(idUnivocoCantiere);
       const testoRiga = JSON.stringify(riga).toUpperCase();
       const numFattura = riga.numft ? String(riga.numft).trim() : "";
       if (numFattura !== "" && numFattura !== "-" && (parseFloat(riga.imptotft) || 0) > 0 && !(riga.codpagam || "").toUpperCase().trim().startsWith("RB")) cliente.haInsoluto = true;
@@ -868,6 +885,10 @@ Tecnico: ${tecnicoNome}`;
                 cliente.dettaglioAttrezzature = dettaglio;
             }
         }
+    }
+
+    if (righeScartate > 0) {
+        console.warn(`Attenzione: ${righeScartate} righe ignorate perché mancava la Ragione Sociale.`);
     }
 
     const datiConCoordinate = [];
@@ -1722,22 +1743,34 @@ Tecnico: ${tecnicoNome}`;
                                <span className="flex items-center gap-1.5"><PauseCircle size={16}/> SOSPESI</span>
                                <span className="bg-slate-800 text-white px-2.5 py-0.5 rounded-full text-[10px] shadow-sm">{clientiInSospeso.length}</span>
                            </h3>
-                           <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+                           <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
                                {clientiInSospeso.map(item => (
                                   <div 
                                       key={item.codice} 
                                       draggable={!(item.resoEstintori && item.giorniDallUltimoSos < 5)}
                                       onDragStart={(e) => handleDragStartKanban(e, item.codice)}
                                       onClick={() => !(item.resoEstintori && item.giorniDallUltimoSos < 5) && apriModaleSospeso(item)}
-                                      className={`bg-white border p-3 rounded-xl shadow-sm flex flex-col gap-1 transition-all ${(item.resoEstintori && item.giorniDallUltimoSos < 5) ? 'border-red-300 bg-red-50/40 opacity-70 cursor-not-allowed' : 'border-amber-200 hover:border-blue-400 hover:shadow-md cursor-grab active:cursor-grabbing relative'}`}
+                                      className={`bg-white border px-2 py-1.5 rounded-lg shadow-sm flex flex-col gap-0.5 transition-all ${(item.resoEstintori && item.giorniDallUltimoSos < 5) ? 'border-red-300 bg-red-50/40 opacity-70 cursor-not-allowed' : 'border-amber-200 hover:border-blue-400 hover:shadow-md cursor-grab active:cursor-grabbing relative'}`}
                                   >
-                                      <div className="flex justify-between items-start">
-                                          <span className="bg-amber-100 text-amber-900 font-mono text-[9px] px-2 py-0.5 rounded font-bold">BI: {item.numeroBi}</span>
-                                          <span className="text-[10px] text-slate-500 font-bold flex items-center gap-1"><Timer size={10} className="text-amber-600"/> {item.minutiLavoro}m</span>
+                                      <div className="flex justify-between items-center w-full pr-6">
+                                          <div className="flex items-center gap-1 overflow-hidden">
+                                              <span className="bg-amber-100 text-amber-900 font-mono text-[8px] px-1.5 py-0.5 rounded font-bold shrink-0">BI: {item.numeroBi}</span>
+                                              <span className="font-bold text-slate-900 text-[10px] truncate">{item.nome}</span>
+                                          </div>
+                                          <div className="flex items-center gap-1 shrink-0">
+                                              {item.resoEstintori && <span className="text-amber-600" title="SOS"><AlertTriangle size={10}/></span>}
+                                              <span className="text-[9px] font-bold bg-slate-100 text-slate-600 px-1 rounded">{item.minutiLavoro}m</span>
+                                          </div>
                                       </div>
-                                      <h4 className="font-bold text-slate-900 text-[11px] leading-tight mt-1 pr-6">{item.nome}</h4>
-                                      <p className="text-[10px] text-slate-500 truncate mt-0.5">{item.indirizzo}</p>
-                                      <button onClick={(e) => { e.stopPropagation(); setClienteSelezionatoScheda(item); }} className="absolute top-2 right-2 text-slate-400 hover:text-blue-600 bg-slate-50 p-1.5 rounded-lg transition-colors"><FileText size={12}/></button>
+                                      <div className="flex items-center justify-between mt-0.5">
+                                          <p className="text-[9px] text-slate-500 font-medium truncate w-full pr-6">
+                                              <MapPin size={8} className="inline mr-0.5"/>
+                                              {item.indirizzo}, {item.cap ? item.cap + ' ' : ''}{item.localita}
+                                          </p>
+                                      </div>
+                                      <button onClick={(e) => { e.stopPropagation(); setClienteSelezionatoScheda(item); }} className="absolute top-1/2 -translate-y-1/2 right-1 text-slate-400 hover:text-blue-600 p-1 rounded-md transition-colors">
+                                          <FileText size={12}/>
+                                      </button>
                                   </div>
                                ))}
                                {clientiInSospeso.length === 0 && <div className="text-center text-xs text-slate-400 mt-10 font-bold border-2 border-dashed border-slate-300 p-4 rounded-xl">Nessun sospeso. Trascina qui le schede da scartare.</div>}
@@ -1777,7 +1810,7 @@ Tecnico: ${tecnicoNome}`;
                                          )}
                                      </div>
                                      
-                                     <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+                                     <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
                                          {taskGiorno.length === 0 && <div className="text-center text-xs text-slate-400 mt-10 font-bold border-2 border-dashed border-slate-200 p-4 rounded-xl">Giorno vuoto. Trascina qui le schede.</div>}
                                          {taskGiorno.map(item => (
                                             <div 
@@ -1787,32 +1820,47 @@ Tecnico: ${tecnicoNome}`;
                                                 onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverCard(item.codice); }}
                                                 onDragLeave={() => setDragOverCard(null)}
                                                 onDrop={(e) => handleDropToDay(e, g.dataStr, item.codice)}
-                                                className={`p-3 rounded-xl border bg-white shadow-sm text-left relative transition-all
+                                                className={`px-2 py-1.5 rounded-lg border bg-white shadow-sm text-left relative transition-all flex flex-col gap-0.5
                                                     ${dragOverCard === item.codice ? 'border-t-4 border-t-blue-500 mt-2' : ''}
                                                     ${item.isPregresso ? 'border-indigo-200 bg-indigo-50/50 cursor-not-allowed' : item.isDistinta ? 'border-orange-200 bg-orange-50/50 cursor-default' : 'border-slate-200 hover:border-blue-400 cursor-grab active:cursor-grabbing'}
                                                 `}
                                             >
-                                               <div className="flex justify-between items-start mb-1.5">
-                                                  {item.isDistinta ? (
-                                                    <span className="bg-orange-100 text-orange-800 text-[9px] font-extrabold px-2 py-0.5 rounded-md flex items-center gap-1"><Package size={10}/> MAGAZZINO</span>
-                                                  ) : item.isPregresso ? (
-                                                    <span className="bg-indigo-100 text-indigo-800 text-[9px] font-extrabold px-2 py-0.5 rounded-md flex items-center gap-1"><CalendarPlus size={10}/> PREGRESSO</span>
-                                                  ) : (
-                                                    <span className="bg-slate-100 text-slate-700 text-[9px] font-mono font-bold px-2 py-0.5 rounded-md border border-slate-200">BI: {item.numeroBi}</span>
-                                                  )}
+                                               <div className="flex items-center gap-1.5 w-full pr-6">
                                                   {!item.isDistinta && (
-                                                      <span className="text-[10px] font-mono font-bold text-slate-600 flex items-center gap-1"><Clock size={10}/> {item.oraInizio}-{item.oraFine}</span>
+                                                      <span className="text-[9px] font-mono font-bold text-slate-600 shrink-0">{item.oraInizio}</span>
                                                   )}
+                                                  {item.isDistinta ? (
+                                                    <span className="bg-orange-100 text-orange-800 text-[8px] font-extrabold px-1.5 py-0.5 rounded flex items-center gap-1 shrink-0"><Package size={8}/> MAGAZZINO</span>
+                                                  ) : item.isPregresso ? (
+                                                    <span className="bg-indigo-100 text-indigo-800 text-[8px] font-extrabold px-1.5 py-0.5 rounded flex items-center gap-1 shrink-0"><CalendarPlus size={8}/> PREGRESSO</span>
+                                                  ) : (
+                                                    <span className="bg-slate-100 text-slate-700 text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-slate-200 shrink-0">BI:{item.numeroBi}</span>
+                                                  )}
+                                                  <span className={`font-bold text-[10px] truncate ${item.isDistinta ? 'text-orange-900' : 'text-slate-900'}`}>{item.nome}</span>
                                                </div>
-                                               <p className={`font-bold text-[11px] leading-tight mt-1 pr-6 ${item.isDistinta ? 'text-orange-900' : 'text-slate-900'}`}>{item.nome}</p>
-                                               <div className="flex justify-between items-end mt-2">
-                                                   <p className="text-[9px] text-slate-500 font-medium truncate w-[70%]"><MapPin size={10} className="inline mr-0.5"/>{item.localita || item.indirizzo}</p>
-                                                   <div className="flex items-center gap-1.5">
-                                                      {item.resoEstintori && <span className="text-amber-600" title="SOS"><AlertTriangle size={12}/></span>}
-                                                      {!item.isPregresso && !item.isDistinta && <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded text-[9px] font-bold border border-emerald-100">{item.minutiLavoro}m</span>}
+                                               
+                                               <div className="flex justify-between items-center mt-0.5">
+                                                   <p className="text-[9px] text-slate-500 font-medium truncate w-[75%]">
+                                                      <MapPin size={8} className="inline mr-0.5"/>
+                                                      {item.indirizzo}, {item.cap ? item.cap + ' ' : ''}{item.localita}
+                                                   </p>
+                                                   <div className="flex items-center gap-1 shrink-0">
+                                                      {item.resoEstintori && <span className="text-amber-600" title="SOS"><AlertTriangle size={10}/></span>}
+                                                      {!item.isPregresso && !item.isDistinta && <span className="bg-emerald-50 text-emerald-700 px-1 rounded text-[9px] font-extrabold border border-emerald-200">{item.minutiLavoro}m</span>}
                                                    </div>
                                                </div>
-                                               <button onClick={() => setClienteSelezionatoScheda(item)} className="absolute top-2 right-2 text-slate-400 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 p-1.5 rounded-lg transition-colors"><FileText size={12}/></button>
+                                               
+                                               {!item.isPregresso && !item.isDistinta && (
+                                                   <div className="flex items-center text-[8.5px] font-medium text-blue-600 truncate mt-0.5">
+                                                     {item.dettaglioAttrezzature?.length > 0 
+                                                        ? item.dettaglioAttrezzature.map((a:any) => a.descrizione.split(" ")[0]).join(", ") 
+                                                        : "Intervento standard"}
+                                                   </div>
+                                               )}
+
+                                               <button onClick={() => setClienteSelezionatoScheda(item)} className="absolute top-1/2 -translate-y-1/2 right-1 text-slate-400 hover:text-blue-600 p-1 rounded-md transition-colors">
+                                                  <FileText size={12}/>
+                                               </button>
                                             </div>
                                          ))}
                                      </div>
@@ -1849,7 +1897,7 @@ Tecnico: ${tecnicoNome}`;
                         <span className="text-[12px] font-bold text-slate-800">{formattaDataVisuale(g.dataStr)}</span>
                         <span className="text-[10px] text-slate-500">{g.nomeGiorno}</span>
                         <div className="flex items-center gap-1.5 mt-1.5 font-mono text-[10px]">
-                           {isOvertime ? <AlertOctagon size={12} className="text-red-500" /> : <CheckCircle size={12} className="text-emerald-500" />}
+                           {isOvertime ? <AlertOctagon size={12} className="text-red-500" /> : <CheckCircle size={12} className="textemerald-500" />}
                            <span className={isOvertime ? "text-red-700 font-bold" : "text-emerald-700 font-bold"}>
                               Fine st.: {hh}:{mm}
                            </span>
