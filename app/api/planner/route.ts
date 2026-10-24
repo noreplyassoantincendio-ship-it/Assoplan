@@ -32,7 +32,7 @@ export async function POST(request: Request) {
 
     // 1. IL GUINZAGLIO STRUTTURALE: Modello Flash bloccato in modalità JSON puro a creatività zero
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-4-flash", 
+      model: "gemini-3.8-flash", 
       generationConfig: { 
         temperature: 0.0, // Zero creatività, massima precisione matematica
         responseMimeType: "application/json" // IMPEDISCE ERRORI DI SINTASSI (Niente Markdown, niente testo libero)
