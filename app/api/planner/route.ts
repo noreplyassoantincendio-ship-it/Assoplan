@@ -29,72 +29,72 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "API Key mancante nel file .env.local" }, { status: 500 });
     }
 
-    // TEMP 0.1: Obbliga il modello a essere deterministico, logico, freddo e calcolatore. Niente "creatività".
+    // TEMP 0.1: Massima rigidità matematica
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-3.8-flash",
+      model: "gemini-1.5-flash-latest",
       generationConfig: { temperature: 0.1 }
     });
 
     let historyTestuale = "";
     if (history && history.length > 0) {
-      historyTestuale = "--- CRONOLOGIA DELLA CHAT FINORA (Usa queste info per applicare regole e preferenze dell'utente nel tempo) ---\n";
+      historyTestuale = "--- CRONOLOGIA DELLA CHAT FINORA (Usa queste info per applicare regole e preferenze dell'utente) ---\n";
       history.forEach((msg: any) => {
         historyTestuale += `${msg.role === 'user' ? 'UTENTE' : 'ASSISTENTE'}: ${msg.text}\n`;
       });
       historyTestuale += "-------------------------------------------------------------\n\n";
     }
 
-    // IL CERVELLO CONDIVISO: Le regole d'oro di Asso Antincendio
+    // IL NUOVO CERVELLO MULTI-AGENTE
     const regoleAssoAntincendio = `
-LE TAVOLE DELLA LEGGE DI ASSO ANTINCENDIO (REGOLE DA RISPETTARE SEMPRE):
+LE TAVOLE DELLA LEGGE DI ASSO ANTINCENDIO - ARCHITETTURA MULTI-AGENTE:
 
-0. OBBEDIENZA ASSOLUTA IN CHAT:
-    - Sei uno strumento esecutivo. Devi ubbidire TASSATIVAMENTE agli ordini dell'utente.
-    - Se l'utente ti chiede esplicitamente di spostare, assegnare o forzare un cantiere in un giorno specifico, ESEGUILO IMMEDIATAMENTE, ignorando limiti di orario o di logica geografica. L'utente ha sempre l'ultima parola.
+Sei un sistema direzionale composto da 3 Agenti IA che lavorano in sequenza. Esegui il tuo ragionamento diviso in 3 FASI ben distinte (pensiero ad alta voce) prima di generare il JSON finale.
 
-1. LOGICA "A GOCCIA" E VICINANZA GEOGRAFICA:
-   - È assolutamente VIETATO far fare "salti qua e là" al tecnico. Usa SEMPRE la logica della massima vicinanza tra i clienti.
-   - Per zone fuori città: il giro DEVE iniziare dal cliente più lontano al mattino, inserendo i clienti più vicini man mano che si torna verso l'ufficio (Genova) nel pomeriggio.
-   - NON mischiare MAI direttrici opposte nello stesso giorno (Es: Valle di Masone non si mischia con la riviera di Ponente).
+FASE 1: L'AGENTE CARTOGRAFO (Stratega Spaziale)
+- Analizza tutti i cantieri e raggruppali per vicinanza geografica (CAP, Località).
+- Regola assoluta: Non mischiare mai direttrici opposte nello stesso giorno (Es. Levante e Ponente non si mischiano).
+- I cantieri fuori città partono dal più lontano al mattino, rientrando verso Genova nel pomeriggio.
 
-2. ORARI E TOLLERANZA (L'OBIETTIVO È IL RIENTRO IN SEDE):
-   - Inizio turno: ore 08:00 dall'ufficio. Primo appuntamento NON prima delle 08:30.
-   - Il tecnico DEVE rientrare in ufficio entro le 17:00 / 17:15.
-   - Tempi presidi (estintori/idranti/porte): 3 minuti cadauno. Minimo intervento: 20 minuti (se fino a 3 presidi). Impianto Rivelazione/Sprinkler: 30 minuti a impianto. Trasferimento minimo tra cantieri su Calendar: 20 minuti.
-   - Tolleranza traffico: Ammesso un margine di 15-30 minuti (massimo entro le 18:00) SOLO per permettere il tragitto finale di rientro. 
-   - I cantieri in eccesso che fanno sforare le 18:00 DEVONO ESSERE SCARTATI nell'array "sospesi".
+FASE 2: L'AGENTE CRONOMETRISTA (Gestione Tassativi e Time-Blocking)
+- Inizio turno: 08:00 da Genova (primo cliente ~08:30). Fine turno: 17:15 (Tolleranza max 18:00).
+- LA REGOLA DEL MURO (PREGRESSI): I codici "PREGRESSO_" sono eventi fissi e inamovibili (Tassativi). 
+- Se trovi un PREGRESSO a metà giornata (es. alle 14:00), NON puoi lasciare la mattina vuota. Devi spezzare la giornata in due blocchi di tempo:
+  * Blocco Mattina: dalle 08:30 fino all'orario di inizio del pregresso. RIEMPILO con cantieri vicini al pregresso.
+  * Blocco Pomeriggio: dalla fine del pregresso fino alle 17:15. RIEMPILO con cantieri sulla via del ritorno.
+- I cantieri lunghi (> 6 ore) vanno inseriti come primo intervento della giornata.
+- I cantieri > 8 ore non ci stanno fisicamente: scartali nei sospesi.
 
-3. GESTIONE DEI BUCHI A FINE GIORNATA:
-   - DEVI riempire TUTTO il tempo disponibile al tecnico senza lasciare buchi, a parte la pausa.
-   - Se ci sono eventi pregressi fissati a metà giornata, inserisci interventi prima e dopo tali eventi per ottimizzare i tempi.
-   - Se a fine giro (es. ore 15:00) il tecnico torna verso Genova, cerca nei "sospesi" clienti di STRADA per riempire il buco. Se ci sono solo clienti lontani, non inserirli.
+FASE 3: L'AGENTE SUPERVISORE (Controllo Qualità Spietato)
+- Applica questa Checklist di correzione interna prima di validare il piano:
+  1. Hai lasciato ore vuote al mattino prima di un tassativo pomeridiano? Se sì, correggi inserendo cantieri.
+  2. La somma dei minuti fa sforare le 18:00 al tecnico? Se sì, SCARTA l'ultimo cantiere e mettilo nei "sospesi".
+  3. L'utente ti ha dato un ordine esplicito in chat? Se sì, questo prevale su tutte le regole precedenti.
 
-4. GESTIONE DEI CANTIERI LUNGHI (I MACIGNI):
-   - Interventi > 6 ore: Piazzali SEMPRE a inizio giornata.
-   - Interventi > 8 ore: NON entrano in una singola giornata. Scartali nei "sospesi" e nella risposta discorsiva (messaggioChat) avvisa l'utente.
+ESEMPI DI ADDESTRAMENTO (FEW-SHOT PROMPTING - COPIA QUESTI RAGIONAMENTI):
+- CASO A (Tassativo Pomeridiano): C'è un PREGRESSO alle 14:30 a Genova Centro. 
+  Soluzione corretta: Il Cronometrista riempie il blocco 08:30-12:30 con 3 interventi a Genova Est/Centro. Pausa. Alle 14:30 c'è il pregresso. Dalle 15:30 alle 17:00 inserisce un altro intervento verso l'ufficio.
+- CASO B (Buco a fine giornata): Il tecnico finisce alle 15:00 a Voltri. Nei sospesi c'è Nervi (lontano) e Pra (vicino).
+  Soluzione corretta: Inserisci Pra. Lascia Nervi nei sospesi per non far attraversare la città al tecnico.
 
-5. [SOS] E [INS]:
-   - [SOS] = Estintore da restituire. [INS] = Insoluto contabile. Trattali come cantieri normali a livello logistico.
+[SOS] (Reso Estintori) e [INS] (Insoluti) sono cantieri normali a livello di logistica stradale.
 `;
 
     if (action === 'pianifica_settimana') {
-      const systemPrompt = `Sei il Responsabile Logistica Senior (Dispatcher) di Asso Antincendio a Genova. Il tuo compito è prendere una lista di cantieri grezzi e ottimizzarli per una settimana lavorativa.
+      const systemPrompt = `Sei il Sistema Multi-Agente di Asso Antincendio. Devi prendere una lista di cantieri grezzi e ottimizzarli per una settimana lavorativa.
 
 ${regoleAssoAntincendio}
 
-Ricorda di consultare la cronologia della chat allegata: se l'utente ti ha dato in passato delle regole fisse o delle eccezioni, applicale rigorosamente.
-
-OUTPUT RICHIESTO (RAGIONA PRIMA DI SCRIVERE IL JSON):
-Fase 1: Scrivi un blocco testuale che inizia con "ANALISI LOGISTICA:". Qui devi elencare brevemente i raggruppamenti per zona e verificare matematicamente che la somma dei minuti non superi l'orario di fine turno.
-Fase 2: Restituisci il piano in formato JSON racchiuso tra parentesi graffe. Struttura esatta:
+OUTPUT RICHIESTO:
+Scrivi il tuo ragionamento analitico esplicitando le 3 fasi (CARTOGRAFO, CRONOMETRISTA, SUPERVISORE) in un blocco di testo.
+Poi, alla fine, restituisci ESCLUSIVAMENTE il piano in formato JSON racchiuso tra parentesi graffe. Struttura esatta:
 {
   "giorni": {
-    "2026-10-05": ["codiceCliente1", "codiceCliente2"]
+    "2026-10-05": ["codiceCliente1", "PREGRESSO_123", "codiceCliente2"]
   },
   "sospesi": ["codiceCliente4"]
 }`;
 
-      const promptData = `${historyTestuale}DATI DA ELABORARE:\n\nGIORNATE E ANCORE:\n${JSON.stringify(data.giornate, null, 2)}\n\nCANTIERI:\n${JSON.stringify(data.interventi, null, 2)}`;
+      const promptData = `${historyTestuale}DATI DA ELABORARE:\n\nGIORNATE E ANCORE (PREGRESSI):\n${JSON.stringify(data.giornate, null, 2)}\n\nCANTIERI DA INCASTRARE:\n${JSON.stringify(data.interventi, null, 2)}`;
 
       const result = await generateWithRetry(model, [{ text: systemPrompt }, { text: promptData }]);
       const responseText = result.response.text();
@@ -110,7 +110,7 @@ Fase 2: Restituisci il piano in formato JSON racchiuso tra parentesi graffe. Str
     }
 
     if (action === 'modifica_chat') {
-      const systemPrompt = `Sei l'Assistente Logistico Senior di Asso Antincendio. Devi analizzare il comando dell'utente e applicare le modifiche allo STATO LOGISTICO ATTUALE.
+      const systemPrompt = `Sei il Sistema Multi-Agente di Asso Antincendio. Devi analizzare il comando dell'utente e applicare le modifiche alla plancia attuale.
 
 ${regoleAssoAntincendio}
 
@@ -119,17 +119,16 @@ ${historyTestuale}
 STATO LOGISTICO ATTUALE (DA MODIFICARE):
 ${JSON.stringify(statoAttuale, null, 2)}
 
-REGOLE DI RISPOSTA:
-1. Sii proattivo: Fai notare se l'utente chiede una modifica che vìola una regola (es. mischiare direttrici), ma ESEGUILA COMUNQUE.
-2. Ordine: L'inizio dell'array è il mattino, la fine dell'array è il pomeriggio.
-3. PREGRESSI: I codici che iniziano con "PREGRESSO_" sono intoccabili, usali come "spartiacque".
-4. Non perdere dati: Ricopia integralmente i codici dei cantieri e i giorni che non hai toccato. I cantieri rimossi vanno spostati in "sospesi".
+REGOLE DI RISPOSTA CHAT:
+1. Ordine: L'inizio dell'array è il mattino, la fine dell'array è il pomeriggio. Usa i PREGRESSO_... come spartiacque.
+2. I cantieri rimossi da un giorno vanno obbligatoriamente spostati nell'array "sospesi".
+3. Ricopia integralmente i codici che non hai toccato.
 
-OUTPUT RICHIESTO (RAGIONA PRIMA DI SCRIVERE IL JSON):
-Fase 1: Scrivi un blocco testuale che inizia con "ANALISI COMANDO:" in cui valuti l'ordine dell'utente e fai un calcolo logico.
+OUTPUT RICHIESTO:
+Fase 1: Scrivi la tua analisi come SUPERVISORE. Valuta la fattibilità dell'ordine.
 Fase 2: Genera il JSON racchiuso tra parentesi graffe. Formato:
 {
-  "messaggioChat": "Ciao capo, ho spostato il cantiere...",
+  "messaggioChat": "Capo, ho fatto come hai chiesto. Ho spostato il cantiere prima del tassativo...",
   "piano": {
     "giorni": {
       "2026-10-05": ["codice1", "PREGRESSO_...", "codice2"]
@@ -138,7 +137,7 @@ Fase 2: Genera il JSON racchiuso tra parentesi graffe. Formato:
   }
 }`;
 
-      const instruction = `Comando o constatazione dell'utente: "${comandoUtente}"`;
+      const instruction = `Comando dell'utente: "${comandoUtente}"`;
 
       const result = await generateWithRetry(model, [{ text: systemPrompt }, { text: instruction }]);
       const responseText = result.response.text();
