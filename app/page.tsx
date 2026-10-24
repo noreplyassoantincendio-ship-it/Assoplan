@@ -365,13 +365,13 @@ export default function Home() {
   }, [clienteSelezionatoScheda, sospesoInModifica]);
 
   const trovaCoordinateGoogle = async (indirizzo: string, localita: string) => {
-    let cleanAddr = indirizzo.replace(/Nessun indirizzo valido letto/gi, '').trim();
+    let cleanAddr = String(indirizzo).replace(/Nessun indirizzo valido letto/gi, '').trim();
     
-    if (cleanAddr.toLowerCase().includes("acquasanta") || (localita && localita.toLowerCase().includes("acquasanta"))) {
+    if (cleanAddr.toLowerCase().includes("acquasanta") || (localita && String(localita).toLowerCase().includes("acquasanta"))) {
       return { lat: 44.4568, lng: 8.7678, precisione: "strada", origine: "override_manuale" };
     }
 
-    let citta = localita && localita.trim().length > 0 ? localita.trim() : "";
+    let citta = localita && String(localita).trim().length > 0 ? String(localita).trim() : "";
     if (cleanAddr.includes("-") && !citta) {
        const parts = cleanAddr.split("-");
        cleanAddr = parts[0].trim();
@@ -719,374 +719,379 @@ Tecnico: ${tecnicoNome}`;
     setInElaborazione(true);
     setProgressIA({ active: true, percent: 5, text: "Avvio elaborazione e lettura dati Excel..." });
 
-    const clientiMappa = new Map();
-    
-    setProgressIA({ active: true, percent: 15, text: "Sincronizzazione impegni Calendar in corso..." });
-    const impegniEsistenti = await fetchEventiRealiCalendar(tecnicoSelezionato.email, googleToken);
-    
-    let tuttiIBiGiaInCalendario: string[] = [];
-    impegniEsistenti.forEach(evt => { tuttiIBiGiaInCalendario = [...tuttiIBiGiaInCalendario, ...evt.numeriBiRilevati]; });
-
-    setProgressIA({ active: true, percent: 30, text: "Analisi foglio Excel e anagrafiche Rubrica..." });
-    
-    let righeScartate = 0; // Contatore per il nuovo audit
-
-    for (const riga of righe) {
-      const nomeCliente = (riga.desclifor || "").toUpperCase();
-      if (!nomeCliente) {
-         righeScartate++;
-         continue; 
-      }
-
-      const numeroBi = String(riga.numdoc || riga.nrob || riga.id_bi || riga.documento || riga.codicebi || "").trim();
-      const codPerRubrica = riga.codclifor ? String(riga.codclifor).trim() : "";
-      
-      let idUnivocoCantiere = "";
-      if (numeroBi && numeroBi !== "0" && numeroBi !== "-") {
-          idUnivocoCantiere = `BI_${numeroBi}`;
-      } else {
-          const ind = riga.indirizzo || riga.INDIRIZZO || "NoInd";
-          idUnivocoCantiere = `CLI_${codPerRubrica}_${ind}`;
-      }
-
-      const datiRubrica = rubricaClienti[codPerRubrica] || {};
-      const telDaUsare = datiRubrica.cellulare || datiRubrica.telefono || riga.telefono || riga.TELEFONO || riga.tel || riga.TEL || "";
-      const emailDaUsare = datiRubrica.email || riga.email || riga.EMAIL || riga['e-mail'] || "";
-      const contattoDaUsare = datiRubrica.contatto || "";
-
-      if (!clientiMappa.has(idUnivocoCantiere)) {
-        clientiMappa.set(idUnivocoCantiere, {
-          codice: idUnivocoCantiere, 
-          numeroBi: numeroBi || "BI-GENERICA", 
-          nome: riga.desclifor || "Sconosciuto",
-          indirizzo: riga.indirizzo || riga.INDIRIZZO || "", 
-          localita: riga.localita || riga.LOCALITA || "",
-          cap: riga.cap || riga.CAP || "",
-          telefono: telDaUsare, email: emailDaUsare, contatto: contattoDaUsare,
-          haInsoluto: false, resoEstintori: false, totaleArticoli: 0, minutiLavoro: 10, dettaglioAttrezzature: [], selezionatoPerGiro: false, giorniDallUltimoSos: 8, syncedToGoogle: false, muletti_eorv: 0,
-          _rawItems: [], _maxMt: { eo: 0, po: 0, id: 0, la: 0, ir: 0, ss: 0, ri: 0, gp: 0, rv: 0 }
-        });
-      }
-
-      const cliente = clientiMappa.get(idUnivocoCantiere);
-      const testoRiga = JSON.stringify(riga).toUpperCase();
-      const numFattura = riga.numft ? String(riga.numft).trim() : "";
-      if (numFattura !== "" && numFattura !== "-" && (parseFloat(riga.imptotft) || 0) > 0 && !(riga.codpagam || "").toUpperCase().trim().startsWith("RB")) cliente.haInsoluto = true;
-      if ((riga.codclose ? String(riga.codclose).toUpperCase().trim() : "") === "SOS" || testoRiga.includes("SOS")) cliente.resoEstintori = true;
-
-      const qta = Number(riga.quantita) || 0;
-      const desc = String(riga.desdocrig || "");
-      if (qta > 0 && desc) {
-          cliente._rawItems.push({ desc, qta });
-      }
-      
-      cliente._maxMt.eo = Math.max(cliente._maxMt.eo, Number(riga.eo_mt) || 0);
-      cliente._maxMt.po = Math.max(cliente._maxMt.po, Number(riga.po_mt) || 0);
-      cliente._maxMt.id = Math.max(cliente._maxMt.id, Number(riga.id_mt) || 0);
-      cliente._maxMt.la = Math.max(cliente._maxMt.la, Number(riga.la_mt) || 0);
-      cliente._maxMt.ir = Math.max(cliente._maxMt.ir, Number(riga.ir_mt) || 0);
-      cliente._maxMt.ss = Math.max(cliente._maxMt.ss, Number(riga.ss_mt) || 0);
-      cliente._maxMt.ri = Math.max(cliente._maxMt.ri, Number(riga.ri_mt) || 0);
-      cliente._maxMt.gp = Math.max(cliente._maxMt.gp, Number(riga.gp_mt) || 0);
-      cliente._maxMt.rv = Math.max(cliente._maxMt.rv, Number(riga.eo_rv || riga.EO_RV) || 0);
-    }
-
-    setProgressIA({ active: true, percent: 45, text: "Calcolo Geografico (Google Maps API)..." });
-    for (const cliente of Array.from(clientiMappa.values())) {
-        if (cliente.resoEstintori) {
-            let veriMuletti = cliente._maxMt.rv || 0;
-            cliente.muletti_eorv = veriMuletti;
-            if (veriMuletti > 0) {
-                cliente.minutiLavoro = 10 + (veriMuletti * 2);
-                cliente.totaleArticoli = veriMuletti;
-                cliente.dettaglioAttrezzature = [{ descrizione: "Restituzione Estintori (SOS)", quantita: veriMuletti, categoria: "Rev (2m)", minutiImpegno: veriMuletti * 2 }];
-            } else {
-                cliente.minutiLavoro = 10;
-                cliente.totaleArticoli = 0;
-                cliente.dettaglioAttrezzature = [];
-            }
-        } else {
-            let sumQtaEstintori = 0;
-            let sumQtaPorte = 0;
-            let sumQtaIdranti = 0;
-            let sumQtaLampade = 0;
-            let sumQtaIrai = 0;
-            let sumQtaReti = 0;
-            let sumQtaGruppi = 0;
-            let sumQtaUscite = 0;
-
-            cliente._rawItems.forEach((item: any) => {
-                const d = item.desc.toLowerCase();
-                const q = item.qta;
-                if (d.includes("estintor") || d.includes("schiuma") || d.includes("co2") || d.includes("polvere") || d.includes("idrico")) sumQtaEstintori += q;
-                else if (d.includes("porta") || d.includes("rei") || d.includes("tagliafuoco")) sumQtaPorte += q;
-                else if (d.includes("naspo") || d.includes("idrant") || d.includes("manichett") || d.includes("manichet")) sumQtaIdranti += q;
-                else if (d.includes("lampad")) sumQtaLampade += q;
-                else if (d.includes("emergenza") || d.includes("antipanico")) sumQtaUscite += q;
-                else if (d.includes("rivelazion") || d.includes("rilevazion") || d.includes("fumi") || d.includes("irai")) sumQtaIrai += q;
-                else if (d.includes("rete idrica") || d.includes("mandata")) sumQtaReti += q;
-                else if (d.includes("gruppo") || d.includes("pressurizzazion") || d.includes("pompe")) sumQtaGruppi += q;
-            });
-
-            const usaRighe = (
-                (sumQtaEstintori > 0 && cliente._maxMt.eo <= 1 && sumQtaEstintori > 1) || 
-                (sumQtaPorte > 0 && cliente._maxMt.po === 0) ||
-                (sumQtaIdranti > 0 && cliente._maxMt.id === 0) ||
-                (sumQtaLampade > 0 && cliente._maxMt.la === 0)
-            );
-
-            let minutiTotali = 0;
-            let pezziTotali = 0;
-            const dettaglio: any[] = [];
-
-            if (usaRighe) {
-                const itemsRighe = [
-                    { v: sumQtaEstintori, m: 2, n: "Estintori (Da Righe)" },
-                    { v: sumQtaIdranti, m: 2, n: "Idranti (Da Righe)" },
-                    { v: sumQtaPorte, m: 3, n: "Porte Tagliafuoco (Da Righe)" },
-                    { v: sumQtaUscite, m: 2, n: "Uscite Emergenza (Da Righe)" },
-                    { v: sumQtaLampade, m: 1, n: "Lampade Emergenza (Da Righe)" },
-                    { v: sumQtaIrai, m: 30, n: "Impianto Rilevazione (Da Righe)" },
-                    { v: sumQtaReti, m: 15, n: "Rete Idrica (Da Righe)" },
-                    { v: sumQtaGruppi, m: 20, n: "Gruppo Pressurizzazione (Da Righe)" }
-                ];
-                itemsRighe.forEach(it => { 
-                    if(it.v > 0) { 
-                        minutiTotali += it.v * it.m; pezziTotali += it.v; 
-                        dettaglio.push({ descrizione: it.n, quantita: it.v, categoria: `(${it.m}m/pz)`, minutiImpegno: it.v * it.m }); 
-                    } 
-                });
-            } else {
-                const itemsMt = [
-                    { v: cliente._maxMt.eo, m: 2, n: "Estintori (Manutenzione)" },
-                    { v: cliente._maxMt.id, m: 2, n: "Idranti" },
-                    { v: cliente._maxMt.po, m: 3, n: "Porte Tagliafuoco / REI" },
-                    { v: cliente._maxMt.ss, m: 2, n: "Uscite di Emergenza" },
-                    { v: cliente._maxMt.la, m: 1, n: "Lampade di Emergenza" },
-                    { v: cliente._maxMt.ir, m: 30, n: "Impianto Rilevazione (IRAI)" },
-                    { v: cliente._maxMt.ri, m: 15, n: "Rete Idrica" },
-                    { v: cliente._maxMt.gp, m: 20, n: "Gruppo Pressurizzazione" }
-                ];
-                itemsMt.forEach(it => { 
-                    if(it.v > 0) { 
-                        minutiTotali += it.v * it.m; pezziTotali += it.v; 
-                        dettaglio.push({ descrizione: it.n, quantita: it.v, categoria: `(${it.m}m/pz)`, minutiImpegno: it.v * it.m }); 
-                    } 
-                });
-            }
-            
-            cliente.muletti_eorv = cliente._maxMt.rv || 0;
-            
-            if (minutiTotali > 0) {
-                cliente.totaleArticoli = pezziTotali;
-                cliente.minutiLavoro = 10 + minutiTotali;
-                cliente.dettaglioAttrezzature = dettaglio;
-            }
-        }
-    }
-
-    if (righeScartate > 0) {
-        console.warn(`Attenzione: ${righeScartate} righe ignorate perché mancava la Ragione Sociale.`);
-    }
-
-    const datiConCoordinate = [];
-    for (const cliente of Array.from(clientiMappa.values())) {
-      let coordinate = null;
-      let origineCoord = "default";
-      if (cliente.indirizzo?.trim().length > 2) {
-        coordinate = await trovaCoordinateGoogle(cliente.indirizzo, cliente.localita);
-        if (coordinate) origineCoord = coordinate.origine || "google";
-      }
-      datiConCoordinate.push({ ...cliente, lat: coordinate?.lat || 44.4056, lng: coordinate?.lng || 8.9463, origineCoord });
-    }
-
-    const dateRange = getGiornateLavorative(dataInizio, dataFine, giorniAttivi);
-
-    const eventiPregressiUI = impegniEsistenti.filter(evt => dateRange.some(d => d.dataStr === evt.dataStr)).map(evt => {
-        const hhStart = String(evt.startD.getHours()).padStart(2, '0');
-        const mmStart = String(evt.startD.getMinutes()).padStart(2, '0');
-        const hhEnd = String(evt.endD.getHours()).padStart(2, '0');
-        const mmEnd = String(evt.endD.getMinutes()).padStart(2, '0');
-
-        let nomeCliente = evt.summary || "Impegno in Calendario";
-        let numeroBi = evt.numeriBiRilevati.length > 0 ? evt.numeriBiRilevati[0] : "-";
-        nomeCliente = nomeCliente.replace(/\[.*?\]/g, "").trim();
-        if (nomeCliente.includes("- BI")) nomeCliente = nomeCliente.split("- BI")[0].trim();
-
-        let telefono = ""; let email = ""; let contatto = "";
-        if (evt.description) {
-            const telMatch = evt.description.match(/📞\s*([0-9\+\s]+)/);
-            if (telMatch) telefono = telMatch[1].trim();
-            const emailMatch = evt.description.match(/📧\s*Email:\s*([^\s\n]+)/);
-            if (emailMatch) email = emailMatch[1].trim();
-            const contattoMatch = evt.description.match(/👤\s*Contatto:\s*([^\n]+)/);
-            if (contattoMatch) contatto = contattoMatch[1].trim();
-        }
-
-        return {
-            codice: `PREGRESSO_${evt.id}`,
-            isPregresso: true, isDistinta: false,
-            nome: nomeCliente, numeroBi: numeroBi,
-            indirizzo: evt.location || "Vedi Google Calendar", localita: "",
-            oraInizio: `${hhStart}:${mmStart}`, oraFine: `${hhEnd}:${mmEnd}`,
-            dataAssegnata: evt.dataStr, giorno: getNomeGiorno(evt.dataStr),
-            selezionatoPerGiro: true, syncedToGoogle: true,
-            minutiLavoro: evt.durataMinuti, lat: evt.lat, lng: evt.lng,
-            contatto, telefono, email, muletti_eorv: 0, origineCoord: "calendar",
-            descrizionePregressa: evt.description || "Nessun dettaglio da Google"
-        };
-    });
-
-    const clientiDaPianificare = [];
-    const clientiSospesiTmp = [];
-    const clientiScartatiTmp = [];
-
-    for (let i = 0; i < datiConCoordinate.length; i++) {
-      const c = datiConCoordinate[i];
-      const biCliente = c.numeroBi.toUpperCase();
-      
-      if (biCliente !== "" && biCliente !== "BI-GENERICA" && tuttiIBiGiaInCalendario.includes(biCliente)) {
-        clientiScartatiTmp.push(c); continue;
-      }
-      if (c.resoEstintori && c.giorniDallUltimoSos < 5) { clientiSospesiTmp.push({ ...c, motivoSospeso: `SOS Bloccato (<5 gg)` }); continue; }
-      
-      clientiDaPianificare.push(c);
-    }
-
-    const giornateStrutturate = dateRange.map(g => {
-      const pregressiDelGiorno = eventiPregressiUI.filter(e => e.dataAssegnata === g.dataStr);
-      let maxFineMinuti = 8 * 60;
-      let anchorLat: number | null = null; let anchorLng: number | null = null;
-
-      pregressiDelGiorno.forEach(imp => {
-        const oraFineStr = imp.oraFine || "18:00";
-        const [h, m] = String(oraFineStr).split(":").map(Number);
-        const fine = (Number(h) * 60) + Number(m);
-        if (fine > maxFineMinuti) maxFineMinuti = fine;
-        if (imp.lat && imp.lng && !anchorLat) { anchorLat = imp.lat; anchorLng = imp.lng; }
-      });
-
-      if (maxFineMinuti > 8 * 60) maxFineMinuti += 30;
-
-      if (maxFineMinuti >= INIZIO_PAUSA && maxFineMinuti < FINE_PAUSA) {
-         maxFineMinuti = FINE_PAUSA;
-      }
-
-      maxFineMinuti = Math.min(maxFineMinuti, FINE_GIORNATA_ASSOLUTA);
-      let minutiDisponibili = Math.max(0, FINE_GIORNATA_ASSOLUTA - maxFineMinuti);
-      let statoGiornata = "APERTO";
-      if (minutiDisponibili < 60) { minutiDisponibili = 0; statoGiornata = "PIENO (Sospeso)"; }
-
-      return { ...g, minutiDisponibili, statoGiornata, anchorLat, anchorLng, orarioPartenzaMinuti: maxFineMinuti };
-    });
-
-    let unassigned = [...clientiDaPianificare];
-    const clientiPianificati = [];
-
-    setProgressIA({ active: true, percent: 55, text: "Connessione all'Agente IA..." });
-
-    let simInterval = setInterval(() => {
-        setProgressIA(prev => {
-            if (prev.percent < 90) {
-                return { ...prev, percent: prev.percent + 1, text: "Ragionamento IA in corso (incrocio vincoli e distanze)..." };
-            }
-            return prev;
-        });
-    }, 1000);
-
     try {
-        const payload = {
-            interventi: unassigned.map(c => ({
-                codice: c.codice,
-                nome: c.nome,
-                indirizzo: c.indirizzo,
-                localita: c.localita,
-                minutiLavoro: c.minutiLavoro
-            })),
-            giornate: giornateStrutturate.map(g => ({
-                dataStr: g.dataStr,
-                nomeGiorno: g.nomeGiorno,
-                pregressi: eventiPregressiUI.filter(p => p.dataAssegnata === g.dataStr).map(p => ({
-                    nome: p.nome,
-                    indirizzo: p.indirizzo,
-                    descrizione: p.descrizionePregressa
-                }))
-            }))
-        };
-
-        const res = await fetch('/api/planner', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                action: 'pianifica_settimana', 
-                data: payload,
-                history: messages.map(m => ({
-                    role: m.sender === 'user' ? 'user' : 'model',
-                    text: m.text
-                }))
-            })
-        });
+        const clientiMappa = new Map();
         
-        clearInterval(simInterval);
-        setProgressIA({ active: true, percent: 92, text: "Applicazione rotte e calcolo tempistiche..." });
-
-        const iaResult = await res.json();
+        setProgressIA({ active: true, percent: 15, text: "Sincronizzazione impegni Calendar in corso..." });
+        const impegniEsistenti = await fetchEventiRealiCalendar(tecnicoSelezionato.email, googleToken);
         
-        if (iaResult.success && iaResult.piano) {
-            unassigned.forEach(c => {
-                let assigned = false;
-                for (const [dataStr, codici] of Object.entries(iaResult.piano.giorni)) {
-                    if ((codici as string[]).includes(c.codice)) {
-                        c.dataAssegnata = dataStr;
-                        c.giorno = getNomeGiorno(dataStr);
-                        c.selezionatoPerGiro = true;
-                        clientiPianificati.push(c);
-                        assigned = true;
-                        break;
-                    }
-                }
-                if (!assigned) {
-                    clientiSospesiTmp.push({ ...c, motivoSospeso: "Scartato dall'IA (Logistica / Tempo)", selezionatoPerGiro: false, dataAssegnata: null });
-                }
+        let tuttiIBiGiaInCalendario: string[] = [];
+        impegniEsistenti.forEach(evt => { tuttiIBiGiaInCalendario = [...tuttiIBiGiaInCalendario, ...evt.numeriBiRilevati]; });
+
+        setProgressIA({ active: true, percent: 30, text: "Analisi foglio Excel e anagrafiche Rubrica..." });
+        
+        let righeScartate = 0;
+
+        for (const riga of righe) {
+          // FORZATURA A STRINGA: impedisce l'errore toUpperCase su celle numeriche (il motivo del blocco al 5%)
+          const nomeCliente = String(riga.desclifor || "").toUpperCase();
+          if (!nomeCliente) {
+             righeScartate++;
+             continue; 
+          }
+
+          const numeroBi = String(riga.numdoc || riga.nrob || riga.id_bi || riga.documento || riga.codicebi || "").trim();
+          const codPerRubrica = riga.codclifor ? String(riga.codclifor).trim() : "";
+          
+          let idUnivocoCantiere = "";
+          if (numeroBi && numeroBi !== "0" && numeroBi !== "-") {
+              idUnivocoCantiere = `BI_${numeroBi}`;
+          } else {
+              const ind = String(riga.indirizzo || riga.INDIRIZZO || "NoInd");
+              idUnivocoCantiere = `CLI_${codPerRubrica}_${ind}`;
+          }
+
+          const datiRubrica = rubricaClienti[codPerRubrica] || {};
+          const telDaUsare = String(datiRubrica.cellulare || datiRubrica.telefono || riga.telefono || riga.TELEFONO || riga.tel || riga.TEL || "");
+          const emailDaUsare = String(datiRubrica.email || riga.email || riga.EMAIL || riga['e-mail'] || "");
+          const contattoDaUsare = String(datiRubrica.contatto || "");
+
+          if (!clientiMappa.has(idUnivocoCantiere)) {
+            clientiMappa.set(idUnivocoCantiere, {
+              codice: idUnivocoCantiere, 
+              numeroBi: numeroBi || "BI-GENERICA", 
+              nome: String(riga.desclifor || "Sconosciuto"),
+              indirizzo: String(riga.indirizzo || riga.INDIRIZZO || ""), 
+              localita: String(riga.localita || riga.LOCALITA || ""),
+              cap: String(riga.cap || riga.CAP || ""),
+              telefono: telDaUsare, email: emailDaUsare, contatto: contattoDaUsare,
+              haInsoluto: false, resoEstintori: false, totaleArticoli: 0, minutiLavoro: 10, dettaglioAttrezzature: [], selezionatoPerGiro: false, giorniDallUltimoSos: 8, syncedToGoogle: false, muletti_eorv: 0,
+              _rawItems: [], _maxMt: { eo: 0, po: 0, id: 0, la: 0, ir: 0, ss: 0, ri: 0, gp: 0, rv: 0 }
             });
-        } else {
-            throw new Error(iaResult.error || "L'Agente IA non ha restituito un piano valido");
+          }
+
+          const cliente = clientiMappa.get(idUnivocoCantiere);
+          const testoRiga = JSON.stringify(riga).toUpperCase();
+          const numFattura = riga.numft ? String(riga.numft).trim() : "";
+          if (numFattura !== "" && numFattura !== "-" && (parseFloat(riga.imptotft) || 0) > 0 && !String(riga.codpagam || "").toUpperCase().trim().startsWith("RB")) cliente.haInsoluto = true;
+          if (String(riga.codclose || "").toUpperCase().trim() === "SOS" || testoRiga.includes("SOS")) cliente.resoEstintori = true;
+
+          const qta = Number(riga.quantita) || 0;
+          const desc = String(riga.desdocrig || "");
+          if (qta > 0 && desc) {
+              cliente._rawItems.push({ desc, qta });
+          }
+          
+          cliente._maxMt.eo = Math.max(cliente._maxMt.eo, Number(riga.eo_mt) || 0);
+          cliente._maxMt.po = Math.max(cliente._maxMt.po, Number(riga.po_mt) || 0);
+          cliente._maxMt.id = Math.max(cliente._maxMt.id, Number(riga.id_mt) || 0);
+          cliente._maxMt.la = Math.max(cliente._maxMt.la, Number(riga.la_mt) || 0);
+          cliente._maxMt.ir = Math.max(cliente._maxMt.ir, Number(riga.ir_mt) || 0);
+          cliente._maxMt.ss = Math.max(cliente._maxMt.ss, Number(riga.ss_mt) || 0);
+          cliente._maxMt.ri = Math.max(cliente._maxMt.ri, Number(riga.ri_mt) || 0);
+          cliente._maxMt.gp = Math.max(cliente._maxMt.gp, Number(riga.gp_mt) || 0);
+          cliente._maxMt.rv = Math.max(cliente._maxMt.rv, Number(riga.eo_rv || riga.EO_RV) || 0);
         }
-    } catch (e: any) {
-        clearInterval(simInterval);
-        console.error("Dettaglio errore IA:", e);
-        if (typeof window !== 'undefined') {
-            window.alert(`Errore IA: ${e.message || "Errore sconosciuto"}. I cantieri sono stati inseriti nei Sospesi.`);
+
+        setProgressIA({ active: true, percent: 45, text: "Calcolo Geografico (Google Maps API)..." });
+        for (const cliente of Array.from(clientiMappa.values())) {
+            if (cliente.resoEstintori) {
+                let veriMuletti = cliente._maxMt.rv || 0;
+                cliente.muletti_eorv = veriMuletti;
+                if (veriMuletti > 0) {
+                    cliente.minutiLavoro = 10 + (veriMuletti * 2);
+                    cliente.totaleArticoli = veriMuletti;
+                    cliente.dettaglioAttrezzature = [{ descrizione: "Restituzione Estintori (SOS)", quantita: veriMuletti, categoria: "Rev (2m)", minutiImpegno: veriMuletti * 2 }];
+                } else {
+                    cliente.minutiLavoro = 10;
+                    cliente.totaleArticoli = 0;
+                    cliente.dettaglioAttrezzature = [];
+                }
+            } else {
+                let sumQtaEstintori = 0;
+                let sumQtaPorte = 0;
+                let sumQtaIdranti = 0;
+                let sumQtaLampade = 0;
+                let sumQtaIrai = 0;
+                let sumQtaReti = 0;
+                let sumQtaGruppi = 0;
+                let sumQtaUscite = 0;
+
+                cliente._rawItems.forEach((item: any) => {
+                    const d = item.desc.toLowerCase();
+                    const q = item.qta;
+                    if (d.includes("estintor") || d.includes("schiuma") || d.includes("co2") || d.includes("polvere") || d.includes("idrico")) sumQtaEstintori += q;
+                    else if (d.includes("porta") || d.includes("rei") || d.includes("tagliafuoco")) sumQtaPorte += q;
+                    else if (d.includes("naspo") || d.includes("idrant") || d.includes("manichett") || d.includes("manichet")) sumQtaIdranti += q;
+                    else if (d.includes("lampad")) sumQtaLampade += q;
+                    else if (d.includes("emergenza") || d.includes("antipanico")) sumQtaUscite += q;
+                    else if (d.includes("rivelazion") || d.includes("rilevazion") || d.includes("fumi") || d.includes("irai")) sumQtaIrai += q;
+                    else if (d.includes("rete idrica") || d.includes("mandata")) sumQtaReti += q;
+                    else if (d.includes("gruppo") || d.includes("pressurizzazion") || d.includes("pompe")) sumQtaGruppi += q;
+                });
+
+                const usaRighe = (
+                    (sumQtaEstintori > 0 && cliente._maxMt.eo <= 1 && sumQtaEstintori > 1) || 
+                    (sumQtaPorte > 0 && cliente._maxMt.po === 0) ||
+                    (sumQtaIdranti > 0 && cliente._maxMt.id === 0) ||
+                    (sumQtaLampade > 0 && cliente._maxMt.la === 0)
+                );
+
+                let minutiTotali = 0;
+                let pezziTotali = 0;
+                const dettaglio: any[] = [];
+
+                if (usaRighe) {
+                    const itemsRighe = [
+                        { v: sumQtaEstintori, m: 2, n: "Estintori (Da Righe)" },
+                        { v: sumQtaIdranti, m: 2, n: "Idranti (Da Righe)" },
+                        { v: sumQtaPorte, m: 3, n: "Porte Tagliafuoco (Da Righe)" },
+                        { v: sumQtaUscite, m: 2, n: "Uscite Emergenza (Da Righe)" },
+                        { v: sumQtaLampade, m: 1, n: "Lampade Emergenza (Da Righe)" },
+                        { v: sumQtaIrai, m: 30, n: "Impianto Rilevazione (Da Righe)" },
+                        { v: sumQtaReti, m: 15, n: "Rete Idrica (Da Righe)" },
+                        { v: sumQtaGruppi, m: 20, n: "Gruppo Pressurizzazione (Da Righe)" }
+                    ];
+                    itemsRighe.forEach(it => { 
+                        if(it.v > 0) { 
+                            minutiTotali += it.v * it.m; pezziTotali += it.v; 
+                            dettaglio.push({ descrizione: it.n, quantita: it.v, categoria: `(${it.m}m/pz)`, minutiImpegno: it.v * it.m }); 
+                        } 
+                    });
+                } else {
+                    const itemsMt = [
+                        { v: cliente._maxMt.eo, m: 2, n: "Estintori (Manutenzione)" },
+                        { v: cliente._maxMt.id, m: 2, n: "Idranti" },
+                        { v: cliente._maxMt.po, m: 3, n: "Porte Tagliafuoco / REI" },
+                        { v: cliente._maxMt.ss, m: 2, n: "Uscite di Emergenza" },
+                        { v: cliente._maxMt.la, m: 1, n: "Lampade di Emergenza" },
+                        { v: cliente._maxMt.ir, m: 30, n: "Impianto Rilevazione (IRAI)" },
+                        { v: cliente._maxMt.ri, m: 15, n: "Rete Idrica" },
+                        { v: cliente._maxMt.gp, m: 20, n: "Gruppo Pressurizzazione" }
+                    ];
+                    itemsMt.forEach(it => { 
+                        if(it.v > 0) { 
+                            minutiTotali += it.v * it.m; pezziTotali += it.v; 
+                            dettaglio.push({ descrizione: it.n, quantita: it.v, categoria: `(${it.m}m/pz)`, minutiImpegno: it.v * it.m }); 
+                        } 
+                    });
+                }
+                
+                cliente.muletti_eorv = cliente._maxMt.rv || 0;
+                
+                if (minutiTotali > 0) {
+                    cliente.totaleArticoli = pezziTotali;
+                    cliente.minutiLavoro = 10 + minutiTotali;
+                    cliente.dettaglioAttrezzature = dettaglio;
+                }
+            }
         }
-        unassigned.forEach(c => {
-            clientiSospesiTmp.push({ ...c, motivoSospeso: `Errore: ${e.message || "Sconosciuto"}`, selezionatoPerGiro: false, dataAssegnata: null });
+
+        if (righeScartate > 0) {
+            console.warn(`Attenzione: ${righeScartate} righe ignorate perché mancava la Ragione Sociale.`);
+        }
+
+        const datiConCoordinate = [];
+        for (const cliente of Array.from(clientiMappa.values())) {
+          let coordinate = null;
+          let origineCoord = "default";
+          if (cliente.indirizzo?.trim().length > 2) {
+            coordinate = await trovaCoordinateGoogle(cliente.indirizzo, cliente.localita);
+            if (coordinate) origineCoord = coordinate.origine || "google";
+          }
+          datiConCoordinate.push({ ...cliente, lat: coordinate?.lat || 44.4056, lng: coordinate?.lng || 8.9463, origineCoord });
+        }
+
+        const dateRange = getGiornateLavorative(dataInizio, dataFine, giorniAttivi);
+
+        const eventiPregressiUI = impegniEsistenti.filter(evt => dateRange.some(d => d.dataStr === evt.dataStr)).map(evt => {
+            const hhStart = String(evt.startD.getHours()).padStart(2, '0');
+            const mmStart = String(evt.startD.getMinutes()).padStart(2, '0');
+            const hhEnd = String(evt.endD.getHours()).padStart(2, '0');
+            const mmEnd = String(evt.endD.getMinutes()).padStart(2, '0');
+
+            let nomeCliente = evt.summary || "Impegno in Calendario";
+            let numeroBi = evt.numeriBiRilevati.length > 0 ? evt.numeriBiRilevati[0] : "-";
+            nomeCliente = nomeCliente.replace(/\[.*?\]/g, "").trim();
+            if (nomeCliente.includes("- BI")) nomeCliente = nomeCliente.split("- BI")[0].trim();
+
+            let telefono = ""; let email = ""; let contatto = "";
+            if (evt.description) {
+                const telMatch = evt.description.match(/📞\s*([0-9\+\s]+)/);
+                if (telMatch) telefono = telMatch[1].trim();
+                const emailMatch = evt.description.match(/📧\s*Email:\s*([^\s\n]+)/);
+                if (emailMatch) email = emailMatch[1].trim();
+                const contattoMatch = evt.description.match(/👤\s*Contatto:\s*([^\n]+)/);
+                if (contattoMatch) contatto = contattoMatch[1].trim();
+            }
+
+            return {
+                codice: `PREGRESSO_${evt.id}`,
+                isPregresso: true, isDistinta: false,
+                nome: nomeCliente, numeroBi: numeroBi,
+                indirizzo: evt.location || "Vedi Google Calendar", localita: "",
+                oraInizio: `${hhStart}:${mmStart}`, oraFine: `${hhEnd}:${mmEnd}`,
+                dataAssegnata: evt.dataStr, giorno: getNomeGiorno(evt.dataStr),
+                selezionatoPerGiro: true, syncedToGoogle: true,
+                minutiLavoro: evt.durataMinuti, lat: evt.lat, lng: evt.lng,
+                contatto, telefono, email, muletti_eorv: 0, origineCoord: "calendar",
+                descrizionePregressa: evt.description || "Nessun dettaglio da Google"
+            };
         });
+
+        const clientiDaPianificare = [];
+        const clientiSospesiTmp = [];
+        const clientiScartatiTmp = [];
+
+        for (let i = 0; i < datiConCoordinate.length; i++) {
+          const c = datiConCoordinate[i];
+          const biCliente = c.numeroBi.toUpperCase();
+          
+          if (biCliente !== "" && biCliente !== "BI-GENERICA" && tuttiIBiGiaInCalendario.includes(biCliente)) {
+            clientiScartatiTmp.push(c); continue;
+          }
+          if (c.resoEstintori && c.giorniDallUltimoSos < 5) { clientiSospesiTmp.push({ ...c, motivoSospeso: `SOS Bloccato (<5 gg)` }); continue; }
+          
+          clientiDaPianificare.push(c);
+        }
+
+        const giornateStrutturate = dateRange.map(g => {
+          const pregressiDelGiorno = eventiPregressiUI.filter(e => e.dataAssegnata === g.dataStr);
+          let maxFineMinuti = 8 * 60;
+          let anchorLat: number | null = null; let anchorLng: number | null = null;
+
+          pregressiDelGiorno.forEach(imp => {
+            const oraFineStr = imp.oraFine || "18:00";
+            const [h, m] = String(oraFineStr).split(":").map(Number);
+            const fine = (Number(h) * 60) + Number(m);
+            if (fine > maxFineMinuti) maxFineMinuti = fine;
+            if (imp.lat && imp.lng && !anchorLat) { anchorLat = imp.lat; anchorLng = imp.lng; }
+          });
+
+          if (maxFineMinuti > 8 * 60) maxFineMinuti += 30;
+
+          if (maxFineMinuti >= INIZIO_PAUSA && maxFineMinuti < FINE_PAUSA) {
+             maxFineMinuti = FINE_PAUSA;
+          }
+
+          maxFineMinuti = Math.min(maxFineMinuti, FINE_GIORNATA_ASSOLUTA);
+          let minutiDisponibili = Math.max(0, FINE_GIORNATA_ASSOLUTA - maxFineMinuti);
+          let statoGiornata = "APERTO";
+          if (minutiDisponibili < 60) { minutiDisponibili = 0; statoGiornata = "PIENO (Sospeso)"; }
+
+          return { ...g, minutiDisponibili, statoGiornata, anchorLat, anchorLng, orarioPartenzaMinuti: maxFineMinuti };
+        });
+
+        let unassigned = [...clientiDaPianificare];
+        const clientiPianificati = [];
+
+        setProgressIA({ active: true, percent: 55, text: "Connessione all'Agente IA..." });
+
+        let simInterval = setInterval(() => {
+            setProgressIA(prev => {
+                if (prev.percent < 90) {
+                    return { ...prev, percent: prev.percent + 1, text: "Ragionamento IA in corso (incrocio vincoli e distanze)..." };
+                }
+                return prev;
+            });
+        }, 1000);
+
+        try {
+            const payload = {
+                interventi: unassigned.map(c => ({
+                    codice: c.codice,
+                    nome: c.nome,
+                    indirizzo: c.indirizzo,
+                    localita: c.localita,
+                    minutiLavoro: c.minutiLavoro
+                })),
+                giornate: giornateStrutturate.map(g => ({
+                    dataStr: g.dataStr,
+                    nomeGiorno: g.nomeGiorno,
+                    pregressi: eventiPregressiUI.filter(p => p.dataAssegnata === g.dataStr).map(p => ({
+                        nome: p.nome,
+                        indirizzo: p.indirizzo,
+                        descrizione: p.descrizionePregressa
+                    }))
+                }))
+            };
+
+            const res = await fetch('/api/planner', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    action: 'pianifica_settimana', 
+                    data: payload,
+                    history: messages.map(m => ({
+                        role: m.sender === 'user' ? 'user' : 'model',
+                        text: m.text
+                    }))
+                })
+            });
+            
+            clearInterval(simInterval);
+            setProgressIA({ active: true, percent: 92, text: "Applicazione rotte e calcolo tempistiche..." });
+
+            const iaResult = await res.json();
+            
+            if (iaResult.success && iaResult.piano) {
+                unassigned.forEach(c => {
+                    let assigned = false;
+                    for (const [dataStr, codici] of Object.entries(iaResult.piano.giorni)) {
+                        if ((codici as string[]).includes(c.codice)) {
+                            c.dataAssegnata = dataStr;
+                            c.giorno = getNomeGiorno(dataStr);
+                            c.selezionatoPerGiro = true;
+                            clientiPianificati.push(c);
+                            assigned = true;
+                            break;
+                        }
+                    }
+                    if (!assigned) {
+                        clientiSospesiTmp.push({ ...c, motivoSospeso: "Scartato dall'IA (Logistica / Tempo)", selezionatoPerGiro: false, dataAssegnata: null });
+                    }
+                });
+            } else {
+                throw new Error(iaResult.error || "L'Agente IA non ha restituito un piano valido");
+            }
+        } catch (e: any) {
+            clearInterval(simInterval);
+            console.error("Dettaglio errore IA:", e);
+            throw new Error(`Errore di comunicazione con l'IA: ${e.message}`);
+        }
+
+        setProgressIA({ active: true, percent: 98, text: "Finalizzazione plancia logistica..." });
+
+        const datiCombinati = [...eventiPregressiUI, ...clientiPianificati].sort((a, b) => {
+            if (a.dataAssegnata !== b.dataAssegnata) return a.dataAssegnata.localeCompare(b.dataAssegnata);
+            if (a.isPregresso && !b.isPregresso) return -1;
+            if (!a.isPregresso && b.isPregresso) return 1;
+            if (a.isPregresso && b.isPregresso) return a.oraInizio.localeCompare(b.oraInizio);
+            return 0;
+        });
+
+        const resRic = await ricalcolaDistinteEOrari(datiCombinati, giornateStrutturate, true);
+        setInterventiGrezzi(resRic.listaOrdinata);
+        setGiornateStats(resRic.statsAggiornate);
+        setClientiInSospeso(clientiSospesiTmp); 
+        setClientiGiaCalendarizzati(clientiScartatiTmp);
+        
+        if (giornateStrutturate.length > 0) {
+            setGiornoSceltoFiltro(giornateStrutturate[0].dataStr);
+        } else {
+            setGiornoSceltoFiltro("sospesi");
+        }
+
+        setProgressIA({ active: false, percent: 100, text: "Completato!" });
+        setInElaborazione(false);
+        
+    } catch (error: any) {
+        // SISTEMA SALVAVITA: Cattura errori nascosti e sblocca l'interfaccia
+        console.error("Errore critico durante processaRighe:", error);
+        alert(`Generazione interrotta per errore sui dati: ${error.message}. Controlla che il file Excel non contenga caratteri strani.`);
+        setProgressIA({ active: false, percent: 0, text: "" });
+        setInElaborazione(false);
     }
-
-    setProgressIA({ active: true, percent: 98, text: "Finalizzazione plancia logistica..." });
-
-    const datiCombinati = [...eventiPregressiUI, ...clientiPianificati].sort((a, b) => {
-        if (a.dataAssegnata !== b.dataAssegnata) return a.dataAssegnata.localeCompare(b.dataAssegnata);
-        if (a.isPregresso && !b.isPregresso) return -1;
-        if (!a.isPregresso && b.isPregresso) return 1;
-        if (a.isPregresso && b.isPregresso) return a.oraInizio.localeCompare(b.oraInizio);
-        return 0;
-    });
-
-    const resRic = await ricalcolaDistinteEOrari(datiCombinati, giornateStrutturate, true);
-    setInterventiGrezzi(resRic.listaOrdinata);
-    setGiornateStats(resRic.statsAggiornate);
-    setClientiInSospeso(clientiSospesiTmp); 
-    setClientiGiaCalendarizzati(clientiScartatiTmp);
-    
-    if (giornateStrutturate.length > 0) {
-        setGiornoSceltoFiltro(giornateStrutturate[0].dataStr);
-    } else {
-        setGiornoSceltoFiltro("sospesi");
-    }
-
-    setProgressIA({ active: false, percent: 100, text: "Completato!" });
-    setInElaborazione(false);
   };
 
   const handleDragStartKanban = (e: React.DragEvent, codice: string) => {
@@ -1344,7 +1349,7 @@ Tecnico: ${tecnicoNome}`;
           const despagam = String(r.despagam || r.des_pagam || r.pagamento || "").trim();
           const modalitaPagamento = despagam ? `${codpagam} - ${despagam}` : codpagam;
           
-          if (numFattura && numFattura !== "-" && importo > 0 && !codpagam.startsWith("RB")) {
+          if (numFattura && numFattura !== "-" && importo > 0 && !String(codpagam).startsWith("RB")) {
              const chiaveUnivoca = numeroBi || `${numFattura}_${r.codclifor}`;
              
              if (!insolutiMappa.has(chiaveUnivoca)) {
@@ -1584,7 +1589,6 @@ Tecnico: ${tecnicoNome}`;
         </div>
       )}
 
-      {/* HEADER SUPERIORE COLLASSATO */}
       <header className="w-full bg-white border-b border-slate-200 px-6 py-4 flex flex-col md:flex-row justify-between items-start md:items-center shrink-0 z-30 print:hidden">
          <div className="flex items-center gap-4">
             <div className="p-2.5 bg-slate-900 text-white rounded-xl shadow-sm"><Zap size={20} /></div>
@@ -1627,7 +1631,6 @@ Tecnico: ${tecnicoNome}`;
 
       <div className="flex-1 flex flex-col overflow-hidden">
           
-          {/* BARRA RIEPILOGO (SEMPRE VISIBILE) */}
           <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 shrink-0 z-20 print:hidden">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                  <div className="p-4 bg-white rounded-xl border border-slate-200 flex items-center gap-4 shadow-sm">
@@ -1661,7 +1664,6 @@ Tecnico: ${tecnicoNome}`;
               </div>
           </div>
 
-          {/* BARRA DEI TAB (GIORNI) */}
           {interventiGrezzi.length > 0 && (
               <div className="bg-white border-b border-slate-200 px-6 py-2 flex items-center gap-2 overflow-x-auto shrink-0 custom-scrollbar z-20 print:hidden">
                   <button 
@@ -1689,14 +1691,11 @@ Tecnico: ${tecnicoNome}`;
               </div>
           )}
 
-          {/* SPLIT SCREEN CONTENUTO O WELCOME DASHBOARD */}
           {interventiGrezzi.length > 0 ? (
               <div className="flex-1 flex overflow-hidden">
                   
-                  {/* PANNELLO SINISTRO: LISTA CANTIERI */}
                   <div className="w-full md:w-[45%] lg:w-[40%] h-full bg-white border-r border-slate-200 flex flex-col z-10">
                       
-                      {/* HEADER LISTA */}
                       <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center shrink-0">
                           <div>
                               <h2 className="font-extrabold text-slate-900 text-sm">
@@ -1715,7 +1714,6 @@ Tecnico: ${tecnicoNome}`;
                           )}
                       </div>
 
-                      {/* LISTA SCORREVOLE */}
                       <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar" onDragOver={handleDragOverKanban} onDrop={(e) => handleDropToDay(e, giornoSceltoFiltro === "sospesi" ? null : giornoSceltoFiltro)}>
                           {listaAttiva.length === 0 ? (
                               <div className="flex flex-col items-center justify-center h-40 text-slate-400">
@@ -1737,7 +1735,6 @@ Tecnico: ${tecnicoNome}`;
                                           ${item.isPregresso ? 'bg-slate-50 border-slate-200 cursor-not-allowed' : item.isDistinta ? 'bg-slate-50 border-slate-200 cursor-default' : 'hover:border-slate-400 cursor-grab active:cursor-grabbing hover:shadow-sm'}
                                       `}
                                   >
-                                      {/* NUMERINO (Se non sospeso) */}
                                       {giornoSceltoFiltro !== "sospesi" && !item.isDistinta && (
                                           <div className="w-6 shrink-0 flex justify-center">
                                               <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center text-[9px] font-bold border border-slate-200">
@@ -1746,10 +1743,8 @@ Tecnico: ${tecnicoNome}`;
                                           </div>
                                       )}
 
-                                      {/* CORPO DELLA RIGA */}
                                       <div className="flex-1 min-w-0 pl-2 pr-16 flex flex-col justify-center">
                                           <div className="flex items-center gap-2">
-                                              {/* ORARIO o BADGE */}
                                               {item.isDistinta ? (
                                                   <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">MAGAZZINO</span>
                                               ) : item.isPregresso ? (
@@ -1760,15 +1755,12 @@ Tecnico: ${tecnicoNome}`;
                                                   <span className="text-[9px] font-mono font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">BI:{item.numeroBi}</span>
                                               )}
                                               
-                                              {/* NOME CLIENTE */}
                                               <span className={`text-[11px] font-bold truncate ${item.isPregresso || item.isDistinta ? 'text-slate-600' : 'text-slate-900'}`}>{item.nome}</span>
                                               
-                                              {/* ALERT ICONS */}
                                               {item.resoEstintori && <span className="text-orange-500 shrink-0" title="Reso Estintori"><AlertTriangle size={12}/></span>}
                                               {item.haInsoluto && <span className="text-red-500 shrink-0" title="Insoluto"><AlertCircle size={12}/></span>}
                                           </div>
                                           
-                                          {/* SECONDA RIGA: INDIRIZZO E DETTAGLI */}
                                           <div className="flex items-center justify-between mt-0.5 opacity-70">
                                               <span className="text-[9px] font-medium text-slate-500 truncate w-2/3">
                                                   {item.indirizzo}, {item.localita}
@@ -1781,7 +1773,6 @@ Tecnico: ${tecnicoNome}`;
                                           </div>
                                       </div>
 
-                                      {/* AZIONI (Appaiono On Hover) */}
                                       <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                           {!item.isPregresso && !item.isDistinta && (
                                               <div className="relative">
@@ -1814,7 +1805,6 @@ Tecnico: ${tecnicoNome}`;
                       </div>
                   </div>
 
-                  {/* PANNELLO DESTRO: MAPPA GIGANTE */}
                   <div className="hidden md:block flex-1 bg-slate-100 relative z-0 border-t border-slate-200">
                       {leafletLoaded ? (
                           <MapContainer key={giornoSceltoFiltro} center={[SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG]} zoom={12} style={{ height: "100%", width: "100%" }}>
@@ -1838,7 +1828,6 @@ Tecnico: ${tecnicoNome}`;
                   </div>
               </div>
           ) : (
-              // NUOVO STATO VUOTO (WELCOME DASHBOARD)
               <div className="flex-1 overflow-y-auto bg-slate-50 p-8 flex flex-col items-center justify-center">
                   <div className="max-w-3xl w-full">
                       
@@ -1848,7 +1837,7 @@ Tecnico: ${tecnicoNome}`;
                           </div>
                           <h2 className="text-2xl font-extrabold text-slate-900 mb-3">Plancia Operativa in Attesa</h2>
                           <p className="text-sm text-slate-500 max-w-lg mx-auto">
-                              Il sistema multi-agente è pronto. Completa i 3 passaggi per avviare il motore logistico e generare i fogli di viaggio della settimana.
+                              Il sistema multi-agente è pronto. Completa i passaggi per avviare il motore logistico e generare i fogli di viaggio della settimana.
                           </p>
                       </div>
 
@@ -1863,13 +1852,13 @@ Tecnico: ${tecnicoNome}`;
                               <div className="absolute top-0 right-0 p-4 opacity-10"><FileUp size={64}/></div>
                               <span className="bg-slate-100 text-slate-600 font-bold text-[10px] px-2 py-1 rounded mb-4 inline-block">PASSO 2</span>
                               <h3 className="font-extrabold text-slate-900 mb-2">Carica l'Estrazione</h3>
-                              <p className="text-xs text-slate-500">Usa il bottone "Carica Excel" per importare i cantieri da eseguire. Il file verrà incrociato con la rubrica in memoria.</p>
+                              <p className="text-xs text-slate-500">Usa il bottone "Carica Excel" per importare i cantieri da eseguire.</p>
                           </div>
                           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
                               <div className="absolute top-0 right-0 p-4 opacity-10"><Sliders size={64}/></div>
                               <span className="bg-slate-100 text-slate-600 font-bold text-[10px] px-2 py-1 rounded mb-4 inline-block">PASSO 3</span>
                               <h3 className="font-extrabold text-slate-900 mb-2">Avvia il Motore IA</h3>
-                              <p className="text-xs text-slate-500">Clicca su "Genera Rotte". L'Intelligenza Artificiale raggrupperà le zone e incastrerà gli orari attorno ai pregressi.</p>
+                              <p className="text-xs text-slate-500">Clicca su "Genera Rotte". L'IA raggrupperà le zone e incastrerà gli orari attorno ai pregressi.</p>
                           </div>
                       </div>
 
@@ -1894,7 +1883,6 @@ Tecnico: ${tecnicoNome}`;
           )}
       </div>
 
-      {/* SCHEDA DETTAGLIO MODALE */}
       {clienteSelezionatoScheda && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8 relative border border-slate-200 my-auto max-h-[90vh] flex flex-col">
@@ -1961,7 +1949,6 @@ Tecnico: ${tecnicoNome}`;
         </div>
       )}
 
-      {/* CHAT IA (Mantenuta in basso a destra) */}
       <button
         onClick={() => setIsChatOpen(!isChatOpen)}
         className={`fixed bottom-6 right-6 z-[100] w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-all duration-300 print:hidden ${
