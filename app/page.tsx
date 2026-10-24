@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import dynamic from "next/dynamic";
-import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database, Car, Home as HomeIcon, AlertOctagon, MessageSquare } from "lucide-react";
+import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database, Car, Home as HomeIcon, AlertOctagon, MessageSquare, ArrowRightLeft } from "lucide-react";
 
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLayer), { ssr: false });
@@ -226,9 +226,9 @@ export default function Home() {
   const [clientiInSospeso, setClientiInSospeso] = useState<any[]>([]);
   const [clientiGiaCalendarizzati, setClientiGiaCalendarizzati] = useState<any[]>([]);
   
-  // STATO PER LA BARRA DI PROGRESSIONE IA
   const [inElaborazione, setInElaborazione] = useState(false);
   const [progressIA, setProgressIA] = useState({ active: false, percent: 0, text: "" });
+  const [menuAperto, setMenuAperto] = useState<string | null>(null);
   
   const [leafletLoaded, setLeafletLoaded] = useState(false);
   const leafletRef = useRef<any>(null);
@@ -741,12 +741,10 @@ Tecnico: ${tecnicoNome}`;
       const numeroBi = String(riga.numdoc || riga.nrob || riga.id_bi || riga.documento || riga.codicebi || "").trim();
       const codPerRubrica = riga.codclifor ? String(riga.codclifor).trim() : "";
       
-      // IL NUOVO CERVELLO DI RAGGRUPPAMENTO: Non più per cliente, ma per BI univoco o Indirizzo!
       let idUnivocoCantiere = "";
       if (numeroBi && numeroBi !== "0" && numeroBi !== "-") {
           idUnivocoCantiere = `BI_${numeroBi}`;
       } else {
-          // Se non ha un BI, lo raggruppiamo per Cliente + Indirizzo per non fondere cantieri diversi
           const ind = riga.indirizzo || riga.INDIRIZZO || "NoInd";
           idUnivocoCantiere = `CLI_${codPerRubrica}_${ind}`;
       }
@@ -1102,47 +1100,7 @@ Tecnico: ${tecnicoNome}`;
       const draggedCodice = e.dataTransfer.getData("application/kanban-card");
       if (!draggedCodice || draggedCodice === targetCodice) return;
 
-      setInElaborazione(true);
-      try {
-          let result = Array.from(interventiGrezzi);
-          let item = result.find(i => i.codice === draggedCodice);
-          let isFromSospesi = false;
-
-          if (!item) {
-              const sospesoItem = clientiInSospeso.find(i => i.codice === draggedCodice);
-              if (sospesoItem) {
-                  item = { ...sospesoItem, selezionatoPerGiro: true, dataAssegnata: targetDataAssegnata };
-                  isFromSospesi = true;
-              }
-          }
-
-          if (!item) return;
-
-          if (isFromSospesi) {
-              setClientiInSospeso(prev => prev.filter(c => c.codice !== draggedCodice));
-          } else {
-              result = result.filter(i => i.codice !== draggedCodice);
-          }
-
-          item.dataAssegnata = targetDataAssegnata;
-
-          if (targetCodice) {
-              const targetIndex = result.findIndex(i => i.codice === targetCodice && i.dataAssegnata === targetDataAssegnata);
-              if (targetIndex !== -1) {
-                  result.splice(targetIndex, 0, item);
-              } else {
-                  result.push(item);
-              }
-          } else {
-              result.push(item);
-          }
-
-          const resRic = await ricalcolaDistinteEOrari(result, giornateStats, false);
-          setGiornateStats(resRic.statsAggiornate);
-          setInterventiGrezzi(resRic.listaOrdinata);
-      } finally {
-          setInElaborazione(false);
-      }
+      await spostaCantiereRapido(draggedCodice, targetDataAssegnata);
   };
 
   const handleDropToSospesi = async (e: React.DragEvent) => {
@@ -1151,13 +1109,49 @@ Tecnico: ${tecnicoNome}`;
       const draggedCodice = e.dataTransfer.getData("application/kanban-card");
       if (!draggedCodice) return;
 
+      await spostaCantiereRapido(draggedCodice, null);
+  };
+
+  // NUOVA FUNZIONE: Spostamento "a due clic" tramite Menu Rapido
+  const spostaCantiereRapido = async (codiceCantiere: string, dataDestinazione: string | null) => {
+      setMenuAperto(null);
       setInElaborazione(true);
+      
       try {
-          const itemToRemove = interventiGrezzi.find(i => i.codice === draggedCodice);
-          if (itemToRemove && !itemToRemove.isDistinta && !itemToRemove.isPregresso) {
-              const nuoviGrezzi = interventiGrezzi.filter(i => i.codice !== draggedCodice);
-              setClientiInSospeso(prev => [...prev, { ...itemToRemove, motivoSospeso: "Spostato in Sospesi", selezionatoPerGiro: false, dataAssegnata: null }]);
-              const resRic = await ricalcolaDistinteEOrari(nuoviGrezzi, giornateStats, false);
+          let result = Array.from(interventiGrezzi);
+          let item = result.find(i => i.codice === codiceCantiere);
+          let isFromSospesi = false;
+
+          if (!item) {
+              const sospesoItem = clientiInSospeso.find(i => i.codice === codiceCantiere);
+              if (sospesoItem) {
+                  item = { ...sospesoItem, selezionatoPerGiro: true, dataAssegnata: dataDestinazione };
+                  isFromSospesi = true;
+              }
+          }
+
+          if (!item) return;
+
+          if (isFromSospesi) {
+              setClientiInSospeso(prev => prev.filter(c => c.codice !== codiceCantiere));
+          } else {
+              result = result.filter(i => i.codice !== codiceCantiere);
+          }
+
+          if (dataDestinazione) {
+              // Sposto in un giorno
+              item.dataAssegnata = dataDestinazione;
+              result.push(item);
+              const resRic = await ricalcolaDistinteEOrari(result, giornateStats, false);
+              setGiornateStats(resRic.statsAggiornate);
+              setInterventiGrezzi(resRic.listaOrdinata);
+          } else {
+              // Sposto nei sospesi
+              item.dataAssegnata = null;
+              item.selezionatoPerGiro = false;
+              item.motivoSospeso = "Spostato manualmente";
+              setClientiInSospeso(prev => [...prev, item]);
+              const resRic = await ricalcolaDistinteEOrari(result, giornateStats, false);
               setGiornateStats(resRic.statsAggiornate);
               setInterventiGrezzi(resRic.listaOrdinata);
           }
@@ -1562,7 +1556,7 @@ Tecnico: ${tecnicoNome}`;
   }
 
   return (
-    <div className="flex h-screen w-full bg-slate-100 text-slate-900 font-sans overflow-hidden relative print:h-auto print:overflow-visible print:bg-white">
+    <div className="flex h-screen w-full bg-slate-100 text-slate-900 font-sans overflow-hidden relative print:h-auto print:overflow-visible print:bg-white" onClick={() => setMenuAperto(null)}>
       
       {/* 🚀 OVERLAY BARRA DI PROGRESSIONE IA */}
       {progressIA.active && (
@@ -1716,7 +1710,7 @@ Tecnico: ${tecnicoNome}`;
                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                        <div>
                           <h2 className="text-xl font-extrabold text-slate-900 flex items-center gap-2"><GripVertical className="text-blue-600" /> Plancia Operativa Settimanale</h2>
-                          <p className="text-xs text-slate-500">Trascina le schede tra le colonne per affinare la programmazione. O rilascia una scheda su un'altra per posizionarla esattamente lì.</p>
+                          <p className="text-xs text-slate-500">Usa le ⇄ per spostare rapidamente i cantieri, oppure trascinali liberamente tra le colonne.</p>
                        </div>
                        <div className="flex gap-4">
                            {bulkSyncStatus.active ? (
@@ -1752,7 +1746,7 @@ Tecnico: ${tecnicoNome}`;
                                       onClick={() => !(item.resoEstintori && item.giorniDallUltimoSos < 5) && apriModaleSospeso(item)}
                                       className={`bg-white border px-2 py-1.5 rounded-lg shadow-sm flex flex-col gap-0.5 transition-all ${(item.resoEstintori && item.giorniDallUltimoSos < 5) ? 'border-red-300 bg-red-50/40 opacity-70 cursor-not-allowed' : 'border-amber-200 hover:border-blue-400 hover:shadow-md cursor-grab active:cursor-grabbing relative'}`}
                                   >
-                                      <div className="flex justify-between items-center w-full pr-6">
+                                      <div className="flex justify-between items-center w-full pr-[60px]">
                                           <div className="flex items-center gap-1 overflow-hidden">
                                               <span className="bg-amber-100 text-amber-900 font-mono text-[8px] px-1.5 py-0.5 rounded font-bold shrink-0">BI: {item.numeroBi}</span>
                                               <span className="font-bold text-slate-900 text-[10px] truncate">{item.nome}</span>
@@ -1762,15 +1756,34 @@ Tecnico: ${tecnicoNome}`;
                                               <span className="text-[9px] font-bold bg-slate-100 text-slate-600 px-1 rounded">{item.minutiLavoro}m</span>
                                           </div>
                                       </div>
-                                      <div className="flex items-center justify-between mt-0.5">
-                                          <p className="text-[9px] text-slate-500 font-medium truncate w-full pr-6">
+                                      <div className="flex items-center justify-between mt-0.5 pr-[60px]">
+                                          <p className="text-[9px] text-slate-500 font-medium truncate w-full">
                                               <MapPin size={8} className="inline mr-0.5"/>
                                               {item.indirizzo}, {item.cap ? item.cap + ' ' : ''}{item.localita}
                                           </p>
                                       </div>
-                                      <button onClick={(e) => { e.stopPropagation(); setClienteSelezionatoScheda(item); }} className="absolute top-1/2 -translate-y-1/2 right-1 text-slate-400 hover:text-blue-600 p-1 rounded-md transition-colors">
-                                          <FileText size={12}/>
-                                      </button>
+                                      
+                                      {/* BOTTONI AZIONE SOSPESI */}
+                                      <div className="absolute top-1/2 -translate-y-1/2 right-1 flex items-center gap-1">
+                                          <div className="relative">
+                                              <button onClick={(e) => { e.stopPropagation(); setMenuAperto(menuAperto === item.codice ? null : item.codice); }} className="text-slate-400 hover:text-blue-600 p-1.5 rounded-md transition-colors bg-slate-50 border border-slate-200 shadow-sm cursor-pointer">
+                                                  <ArrowRightLeft size={12}/>
+                                              </button>
+                                              {menuAperto === item.codice && (
+                                                  <div className="absolute top-full right-0 mt-1 bg-white border border-slate-200 shadow-xl rounded-lg p-1 z-[99] w-32">
+                                                      <div className="text-[9px] font-bold text-slate-400 px-2 py-1 uppercase">Pianifica in...</div>
+                                                      {giornateStats.map(gs => (
+                                                          <button key={gs.dataStr} onClick={(e) => { e.stopPropagation(); spostaCantiereRapido(item.codice, gs.dataStr); }} className="w-full text-left px-2 py-1.5 text-[10px] font-bold text-slate-700 hover:bg-blue-50 rounded transition-colors cursor-pointer">
+                                                              {gs.nomeGiorno} {formattaDataVisuale(gs.dataStr).slice(0,5)}
+                                                          </button>
+                                                      ))}
+                                                  </div>
+                                              )}
+                                          </div>
+                                          <button onClick={(e) => { e.stopPropagation(); setClienteSelezionatoScheda(item); }} className="text-slate-400 hover:text-blue-600 p-1.5 rounded-md transition-colors bg-slate-50 border border-slate-200 shadow-sm cursor-pointer">
+                                              <FileText size={12}/>
+                                          </button>
+                                      </div>
                                   </div>
                                ))}
                                {clientiInSospeso.length === 0 && <div className="text-center text-xs text-slate-400 mt-10 font-bold border-2 border-dashed border-slate-300 p-4 rounded-xl">Nessun sospeso. Trascina qui le schede da scartare.</div>}
@@ -1825,7 +1838,7 @@ Tecnico: ${tecnicoNome}`;
                                                     ${item.isPregresso ? 'border-indigo-200 bg-indigo-50/50 cursor-not-allowed' : item.isDistinta ? 'border-orange-200 bg-orange-50/50 cursor-default' : 'border-slate-200 hover:border-blue-400 cursor-grab active:cursor-grabbing'}
                                                 `}
                                             >
-                                               <div className="flex items-center gap-1.5 w-full pr-6">
+                                               <div className="flex items-center gap-1.5 w-full pr-[60px]">
                                                   {!item.isDistinta && (
                                                       <span className="text-[9px] font-mono font-bold text-slate-600 shrink-0">{item.oraInizio}</span>
                                                   )}
@@ -1839,8 +1852,8 @@ Tecnico: ${tecnicoNome}`;
                                                   <span className={`font-bold text-[10px] truncate ${item.isDistinta ? 'text-orange-900' : 'text-slate-900'}`}>{item.nome}</span>
                                                </div>
                                                
-                                               <div className="flex justify-between items-center mt-0.5">
-                                                   <p className="text-[9px] text-slate-500 font-medium truncate w-[75%]">
+                                               <div className="flex justify-between items-center mt-0.5 pr-[60px]">
+                                                   <p className="text-[9px] text-slate-500 font-medium truncate w-full">
                                                       <MapPin size={8} className="inline mr-0.5"/>
                                                       {item.indirizzo}, {item.cap ? item.cap + ' ' : ''}{item.localita}
                                                    </p>
@@ -1851,16 +1864,40 @@ Tecnico: ${tecnicoNome}`;
                                                </div>
                                                
                                                {!item.isPregresso && !item.isDistinta && (
-                                                   <div className="flex items-center text-[8.5px] font-medium text-blue-600 truncate mt-0.5">
+                                                   <div className="flex items-center text-[8.5px] font-medium text-blue-600 truncate mt-0.5 pr-[60px]">
                                                      {item.dettaglioAttrezzature?.length > 0 
                                                         ? item.dettaglioAttrezzature.map((a:any) => a.descrizione.split(" ")[0]).join(", ") 
                                                         : "Intervento standard"}
                                                    </div>
                                                )}
 
-                                               <button onClick={() => setClienteSelezionatoScheda(item)} className="absolute top-1/2 -translate-y-1/2 right-1 text-slate-400 hover:text-blue-600 p-1 rounded-md transition-colors">
-                                                  <FileText size={12}/>
-                                               </button>
+                                               {/* BOTTONI AZIONE PIANIFICATI */}
+                                               <div className="absolute top-1/2 -translate-y-1/2 right-1 flex items-center gap-1">
+                                                   {!item.isPregresso && !item.isDistinta && (
+                                                       <div className="relative">
+                                                           <button onClick={(e) => { e.stopPropagation(); setMenuAperto(menuAperto === item.codice ? null : item.codice); }} className="text-slate-400 hover:text-blue-600 p-1.5 rounded-md transition-colors bg-slate-50 border border-slate-200 shadow-sm cursor-pointer">
+                                                               <ArrowRightLeft size={12}/>
+                                                           </button>
+                                                           {menuAperto === item.codice && (
+                                                               <div className="absolute top-full right-0 mt-1 bg-white border border-slate-200 shadow-xl rounded-lg p-1 z-[99] w-32">
+                                                                   <div className="text-[9px] font-bold text-slate-400 px-2 py-1 uppercase">Sposta a...</div>
+                                                                   {giornateStats.map(gs => (
+                                                                       <button key={gs.dataStr} onClick={(e) => { e.stopPropagation(); spostaCantiereRapido(item.codice, gs.dataStr); }} className="w-full text-left px-2 py-1.5 text-[10px] font-bold text-slate-700 hover:bg-blue-50 rounded transition-colors cursor-pointer">
+                                                                           {gs.nomeGiorno} {formattaDataVisuale(gs.dataStr).slice(0,5)}
+                                                                       </button>
+                                                                   ))}
+                                                                   <div className="border-t border-slate-100 my-1"></div>
+                                                                   <button onClick={(e) => { e.stopPropagation(); spostaCantiereRapido(item.codice, null); }} className="w-full text-left px-2 py-1.5 text-[10px] font-bold text-amber-700 hover:bg-amber-50 rounded transition-colors cursor-pointer">
+                                                                       Sospesi
+                                                                   </button>
+                                                               </div>
+                                                           )}
+                                                       </div>
+                                                   )}
+                                                   <button onClick={(e) => { e.stopPropagation(); setClienteSelezionatoScheda(item); }} className="text-slate-400 hover:text-blue-600 p-1.5 rounded-md transition-colors bg-slate-50 border border-slate-200 shadow-sm cursor-pointer">
+                                                       <FileText size={12}/>
+                                                   </button>
+                                               </div>
                                             </div>
                                          ))}
                                      </div>
@@ -1897,7 +1934,7 @@ Tecnico: ${tecnicoNome}`;
                         <span className="text-[12px] font-bold text-slate-800">{formattaDataVisuale(g.dataStr)}</span>
                         <span className="text-[10px] text-slate-500">{g.nomeGiorno}</span>
                         <div className="flex items-center gap-1.5 mt-1.5 font-mono text-[10px]">
-                           {isOvertime ? <AlertOctagon size={12} className="text-red-500" /> : <CheckCircle size={12} className="textemerald-500" />}
+                           {isOvertime ? <AlertOctagon size={12} className="text-red-500" /> : <CheckCircle size={12} className="text-emerald-500" />}
                            <span className={isOvertime ? "text-red-700 font-bold" : "text-emerald-700 font-bold"}>
                               Fine st.: {hh}:{mm}
                            </span>
