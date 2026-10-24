@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import dynamic from "next/dynamic";
-import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database, Car, Home as HomeIcon, AlertOctagon, MessageSquare, ArrowRightLeft, List, Map } from "lucide-react";
+import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database, Car, Home as HomeIcon, AlertOctagon, MessageSquare, ArrowRightLeft, List, Map, FileUp, Settings } from "lucide-react";
 
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLayer), { ssr: false });
@@ -248,7 +248,7 @@ export default function Home() {
     "Lunedì": true, "Martedì": true, "Mercoledì": true, "Giovedì": true, "Venerdì": true, "Sabato": false
   });
 
-  const [giornoSceltoFiltro, setGiornoSceltoFiltro] = useState<string>("sospesi"); // Default tab
+  const [giornoSceltoFiltro, setGiornoSceltoFiltro] = useState<string>("sospesi"); 
   const [clienteSelezionatoScheda, setClienteSelezionatoScheda] = useState<any | null>(null);
   
   const [sospesoInModifica, setSospesoInModifica] = useState<any | null>(null);
@@ -261,7 +261,7 @@ export default function Home() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [messages, setMessages] = useState([
-    { sender: 'ai', text: 'Ciao! Sono il tuo assistente operativo. Carica il file Excel e chiedimi di pianificare o spostare cantieri.' }
+    { sender: 'ai', text: 'Ciao! Sono l\'Assistente IA. Carica un file e chiedimi di ricalcolare i giri o spostare gli interventi.' }
   ]);
   const [chatLoading, setChatLoading] = useState(false);
   
@@ -1079,7 +1079,6 @@ Tecnico: ${tecnicoNome}`;
     setClientiInSospeso(clientiSospesiTmp); 
     setClientiGiaCalendarizzati(clientiScartatiTmp);
     
-    // Set first available day as default active tab
     if (giornateStrutturate.length > 0) {
         setGiornoSceltoFiltro(giornateStrutturate[0].dataStr);
     } else {
@@ -1109,7 +1108,6 @@ Tecnico: ${tecnicoNome}`;
       await spostaCantiereRapido(draggedCodice, targetDataAssegnata, targetCodice);
   };
 
-  // Funzione unificata per lo spostamento e riordinamento (con o senza targetCodice)
   const spostaCantiereRapido = async (codiceCantiere: string, dataDestinazione: string | null, targetCodice?: string) => {
       setMenuAperto(null);
       setInElaborazione(true);
@@ -1561,7 +1559,6 @@ Tecnico: ${tecnicoNome}`;
      );
   }
 
-  // Costruiamo i dati della lista attiva in base al tab selezionato
   let listaAttiva = [];
   let statGiornoAttivo = null;
 
@@ -1575,7 +1572,6 @@ Tecnico: ${tecnicoNome}`;
   return (
     <div className="flex h-screen w-full bg-slate-50 text-slate-900 font-sans overflow-hidden relative print:h-auto print:overflow-visible print:bg-white" onClick={() => setMenuAperto(null)}>
       
-      {/* 🚀 OVERLAY BARRA DI PROGRESSIONE IA */}
       {progressIA.active && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] bg-white rounded-2xl shadow-2xl border border-slate-200 p-4 w-[90%] max-w-md flex flex-col gap-3">
            <div className="flex justify-between items-center">
@@ -1630,9 +1626,44 @@ Tecnico: ${tecnicoNome}`;
       </header>
 
       <div className="flex-1 flex flex-col overflow-hidden">
+          
+          {/* BARRA RIEPILOGO (SEMPRE VISIBILE) */}
+          <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 shrink-0 z-20 print:hidden">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                 <div className="p-4 bg-white rounded-xl border border-slate-200 flex items-center gap-4 shadow-sm">
+                    <div className="p-3 bg-slate-100 text-slate-600 rounded-lg"><Car size={20}/></div>
+                    <div>
+                        <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider">Totale In Carico</span>
+                        <span className="text-2xl font-extrabold text-slate-900">{totaleInCarico}</span>
+                    </div>
+                 </div>
+                 <div className="p-4 bg-white rounded-xl border border-slate-200 flex items-center gap-4 shadow-sm">
+                    <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg"><CheckCircle size={20}/></div>
+                    <div>
+                        <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider">Nuovi in Rotta</span>
+                        <span className="text-2xl font-extrabold text-emerald-600">{clientiAttiviCount}</span>
+                    </div>
+                 </div>
+                 <div className="p-4 bg-white rounded-xl border border-slate-200 flex items-center gap-4 shadow-sm">
+                    <div className="p-3 bg-amber-50 text-amber-600 rounded-lg"><PauseCircle size={20}/></div>
+                    <div>
+                        <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider">Finiti in Sospeso</span>
+                        <span className="text-2xl font-extrabold text-amber-600">{clientiInSospeso.length}</span>
+                    </div>
+                 </div>
+                 <div className="p-4 bg-white rounded-xl border border-slate-200 flex items-center gap-4 shadow-sm">
+                    <div className="p-3 bg-slate-100 text-slate-500 rounded-lg"><CalendarPlus size={20}/></div>
+                    <div>
+                        <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider">Già Fatti/Pregressi</span>
+                        <span className="text-2xl font-extrabold text-slate-600">{clientiGiaCalendarizzati.length + globalPregressiCount}</span>
+                    </div>
+                 </div>
+              </div>
+          </div>
+
           {/* BARRA DEI TAB (GIORNI) */}
           {interventiGrezzi.length > 0 && (
-              <div className="bg-white border-b border-slate-200 px-6 py-2 flex items-center gap-2 overflow-x-auto shrink-0 custom-scrollbar z-20">
+              <div className="bg-white border-b border-slate-200 px-6 py-2 flex items-center gap-2 overflow-x-auto shrink-0 custom-scrollbar z-20 print:hidden">
                   <button 
                       onClick={() => setGiornoSceltoFiltro("sospesi")}
                       className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-xs transition-colors whitespace-nowrap ${giornoSceltoFiltro === "sospesi" ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
@@ -1658,7 +1689,7 @@ Tecnico: ${tecnicoNome}`;
               </div>
           )}
 
-          {/* SPLIT SCREEN CONTENUTO */}
+          {/* SPLIT SCREEN CONTENUTO O WELCOME DASHBOARD */}
           {interventiGrezzi.length > 0 ? (
               <div className="flex-1 flex overflow-hidden">
                   
@@ -1784,7 +1815,7 @@ Tecnico: ${tecnicoNome}`;
                   </div>
 
                   {/* PANNELLO DESTRO: MAPPA GIGANTE */}
-                  <div className="hidden md:block flex-1 bg-slate-100 relative z-0">
+                  <div className="hidden md:block flex-1 bg-slate-100 relative z-0 border-t border-slate-200">
                       {leafletLoaded ? (
                           <MapContainer key={giornoSceltoFiltro} center={[SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG]} zoom={12} style={{ height: "100%", width: "100%" }}>
                               <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
@@ -1807,20 +1838,63 @@ Tecnico: ${tecnicoNome}`;
                   </div>
               </div>
           ) : (
-              // STATO VUOTO INIZIALE
-              <div className="flex-1 flex flex-col items-center justify-center bg-white">
-                  <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mb-4 border border-slate-100">
-                      <Map size={32} className="text-slate-300" />
+              // NUOVO STATO VUOTO (WELCOME DASHBOARD)
+              <div className="flex-1 overflow-y-auto bg-slate-50 p-8 flex flex-col items-center justify-center">
+                  <div className="max-w-3xl w-full">
+                      
+                      <div className="text-center mb-10">
+                          <div className="w-20 h-20 bg-white shadow-sm border border-slate-200 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                              <Map size={36} className="text-slate-800" />
+                          </div>
+                          <h2 className="text-2xl font-extrabold text-slate-900 mb-3">Plancia Operativa in Attesa</h2>
+                          <p className="text-sm text-slate-500 max-w-lg mx-auto">
+                              Il sistema multi-agente è pronto. Completa i 3 passaggi per avviare il motore logistico e generare i fogli di viaggio della settimana.
+                          </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+                          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
+                              <div className="absolute top-0 right-0 p-4 opacity-10"><UserCheck size={64}/></div>
+                              <span className="bg-slate-100 text-slate-600 font-bold text-[10px] px-2 py-1 rounded mb-4 inline-block">PASSO 1</span>
+                              <h3 className="font-extrabold text-slate-900 mb-2">Imposta Variabili</h3>
+                              <p className="text-xs text-slate-500">Seleziona il tecnico dal menu in alto e verifica le date della settimana lavorativa.</p>
+                          </div>
+                          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
+                              <div className="absolute top-0 right-0 p-4 opacity-10"><FileUp size={64}/></div>
+                              <span className="bg-slate-100 text-slate-600 font-bold text-[10px] px-2 py-1 rounded mb-4 inline-block">PASSO 2</span>
+                              <h3 className="font-extrabold text-slate-900 mb-2">Carica l'Estrazione</h3>
+                              <p className="text-xs text-slate-500">Usa il bottone "Carica Excel" per importare i cantieri da eseguire. Il file verrà incrociato con la rubrica in memoria.</p>
+                          </div>
+                          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
+                              <div className="absolute top-0 right-0 p-4 opacity-10"><Sliders size={64}/></div>
+                              <span className="bg-slate-100 text-slate-600 font-bold text-[10px] px-2 py-1 rounded mb-4 inline-block">PASSO 3</span>
+                              <h3 className="font-extrabold text-slate-900 mb-2">Avvia il Motore IA</h3>
+                              <p className="text-xs text-slate-500">Clicca su "Genera Rotte". L'Intelligenza Artificiale raggrupperà le zone e incastrerà gli orari attorno ai pregressi.</p>
+                          </div>
+                      </div>
+
+                      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                              <div className={`p-3 rounded-xl ${googleToken ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                                  <Calendar size={24}/>
+                              </div>
+                              <div>
+                                  <h4 className="font-bold text-sm text-slate-900">Connessione Google Calendar</h4>
+                                  <p className="text-xs text-slate-500 mt-0.5">{googleToken ? 'Connesso e pronto a sincronizzare i pregressi.' : 'Non connesso. Richiesto per elaborare le rotte.'}</p>
+                              </div>
+                          </div>
+                          {!googleToken && (
+                              <button onClick={eseguiLoginGoogle} className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-bold shadow-sm text-xs transition-colors">
+                                  Connetti Ora
+                              </button>
+                          )}
+                      </div>
                   </div>
-                  <h2 className="text-lg font-bold text-slate-900 mb-2">Plancia Operativa Vuota</h2>
-                  <p className="text-sm text-slate-500 text-center max-w-md">
-                      Carica un file Excel con i cantieri e clicca su "Genera Rotte" per avviare il motore logistico.
-                  </p>
               </div>
           )}
       </div>
 
-      {/* SCHEDA DETTAGLIO MODALE (Rimasta identica, ma z-index alto) */}
+      {/* SCHEDA DETTAGLIO MODALE */}
       {clienteSelezionatoScheda && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8 relative border border-slate-200 my-auto max-h-[90vh] flex flex-col">
