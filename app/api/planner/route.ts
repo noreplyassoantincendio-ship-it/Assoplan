@@ -47,7 +47,7 @@ export async function POST(request: Request) {
 
     // Usiamo il modello veloce per non far aspettare 1 minuto all'utente con 3 chiamate
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-3.8-pro-latest",
+      model: "gemini-4-argon",
       generationConfig: { temperature: 0.1 }
     });
 
