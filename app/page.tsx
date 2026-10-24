@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import dynamic from "next/dynamic";
-import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database, Car, Home as HomeIcon, AlertOctagon, MessageSquare, ArrowRightLeft } from "lucide-react";
+import { UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet, MapPinOff, Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Square, Mail, Timer, FileText, X, Sliders, Check, Trash2, ArrowRight, PauseCircle, PlusCircle, ExternalLink, ShieldAlert, AlertTriangle, CheckCircle, PlayCircle, Lock, CalendarPlus, GripVertical, Phone, Book, User, Banknote, Search, Database, Car, Home as HomeIcon, AlertOctagon, MessageSquare, ArrowRightLeft, List, Map } from "lucide-react";
 
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLayer), { ssr: false });
@@ -248,7 +248,7 @@ export default function Home() {
     "Lunedì": true, "Martedì": true, "Mercoledì": true, "Giovedì": true, "Venerdì": true, "Sabato": false
   });
 
-  const [giornoSceltoFiltro, setGiornoSceltoFiltro] = useState<string>("Tutti");
+  const [giornoSceltoFiltro, setGiornoSceltoFiltro] = useState<string>("sospesi"); // Default tab
   const [clienteSelezionatoScheda, setClienteSelezionatoScheda] = useState<any | null>(null);
   
   const [sospesoInModifica, setSospesoInModifica] = useState<any | null>(null);
@@ -985,7 +985,6 @@ Tecnico: ${tecnicoNome}`;
 
     setProgressIA({ active: true, percent: 55, text: "Connessione all'Agente IA..." });
 
-    // Simulazione Avanzamento durante la chiamata IA
     let simInterval = setInterval(() => {
         setProgressIA(prev => {
             if (prev.percent < 90) {
@@ -1080,6 +1079,13 @@ Tecnico: ${tecnicoNome}`;
     setClientiInSospeso(clientiSospesiTmp); 
     setClientiGiaCalendarizzati(clientiScartatiTmp);
     
+    // Set first available day as default active tab
+    if (giornateStrutturate.length > 0) {
+        setGiornoSceltoFiltro(giornateStrutturate[0].dataStr);
+    } else {
+        setGiornoSceltoFiltro("sospesi");
+    }
+
     setProgressIA({ active: false, percent: 100, text: "Completato!" });
     setInElaborazione(false);
   };
@@ -1100,20 +1106,11 @@ Tecnico: ${tecnicoNome}`;
       const draggedCodice = e.dataTransfer.getData("application/kanban-card");
       if (!draggedCodice || draggedCodice === targetCodice) return;
 
-      await spostaCantiereRapido(draggedCodice, targetDataAssegnata);
+      await spostaCantiereRapido(draggedCodice, targetDataAssegnata, targetCodice);
   };
 
-  const handleDropToSospesi = async (e: React.DragEvent) => {
-      e.preventDefault();
-      setDragOverCard(null);
-      const draggedCodice = e.dataTransfer.getData("application/kanban-card");
-      if (!draggedCodice) return;
-
-      await spostaCantiereRapido(draggedCodice, null);
-  };
-
-  // NUOVA FUNZIONE: Spostamento "a due clic" tramite Menu Rapido
-  const spostaCantiereRapido = async (codiceCantiere: string, dataDestinazione: string | null) => {
+  // Funzione unificata per lo spostamento e riordinamento (con o senza targetCodice)
+  const spostaCantiereRapido = async (codiceCantiere: string, dataDestinazione: string | null, targetCodice?: string) => {
       setMenuAperto(null);
       setInElaborazione(true);
       
@@ -1139,14 +1136,23 @@ Tecnico: ${tecnicoNome}`;
           }
 
           if (dataDestinazione) {
-              // Sposto in un giorno
               item.dataAssegnata = dataDestinazione;
-              result.push(item);
+              
+              if (targetCodice) {
+                  const targetIndex = result.findIndex(i => i.codice === targetCodice && i.dataAssegnata === dataDestinazione);
+                  if (targetIndex !== -1) {
+                      result.splice(targetIndex, 0, item);
+                  } else {
+                      result.push(item);
+                  }
+              } else {
+                  result.push(item);
+              }
+              
               const resRic = await ricalcolaDistinteEOrari(result, giornateStats, false);
               setGiornateStats(resRic.statsAggiornate);
               setInterventiGrezzi(resRic.listaOrdinata);
           } else {
-              // Sposto nei sospesi
               item.dataAssegnata = null;
               item.selezionatoPerGiro = false;
               item.motivoSospeso = "Spostato manualmente";
@@ -1479,17 +1485,17 @@ Tecnico: ${tecnicoNome}`;
     if (leafletRef.current) {
       return leafletRef.current.divIcon({
         className: "custom-marker-icon",
-        html: `<div style="background-color: #2563eb; color: white; border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.4); font-size: 11px;">${numero}</div>`,
-        iconSize: [26, 26],
-        iconAnchor: [13, 26],
-        popupAnchor: [0, -26]
+        html: `<div style="background-color: #0f172a; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); font-size: 11px;">${numero}</div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 24],
+        popupAnchor: [0, -24]
       });
     }
     return undefined;
   };
 
   const interventiVisibiliArr = interventiGrezzi.filter(i => giornoSceltoFiltro === "Tutti" || i.dataAssegnata === giornoSceltoFiltro);
-  const clientiAttiviCount = interventiVisibiliArr.filter(i => i.selezionatoPerGiro && !i.isDistinta && !i.isPregresso).length;
+  const clientiAttiviCount = interventiGrezzi.filter(i => i.selezionatoPerGiro && !i.isDistinta && !i.isPregresso).length;
   const globaleAssegnati = interventiGrezzi.filter(i => i.selezionatoPerGiro && !i.isDistinta && !i.isPregresso);
   const globalPregressiCount = interventiGrezzi.filter(i => i.isPregresso).length;
   const totaleInCarico = globaleAssegnati.length + clientiInSospeso.length + globalPregressiCount;
@@ -1555,638 +1561,362 @@ Tecnico: ${tecnicoNome}`;
      );
   }
 
+  // Costruiamo i dati della lista attiva in base al tab selezionato
+  let listaAttiva = [];
+  let statGiornoAttivo = null;
+
+  if (giornoSceltoFiltro === "sospesi") {
+      listaAttiva = clientiInSospeso;
+  } else {
+      listaAttiva = interventiGrezzi.filter(i => i.selezionatoPerGiro && i.dataAssegnata === giornoSceltoFiltro);
+      statGiornoAttivo = giornateStats.find(g => g.dataStr === giornoSceltoFiltro);
+  }
+
   return (
-    <div className="flex h-screen w-full bg-slate-100 text-slate-900 font-sans overflow-hidden relative print:h-auto print:overflow-visible print:bg-white" onClick={() => setMenuAperto(null)}>
+    <div className="flex h-screen w-full bg-slate-50 text-slate-900 font-sans overflow-hidden relative print:h-auto print:overflow-visible print:bg-white" onClick={() => setMenuAperto(null)}>
       
       {/* 🚀 OVERLAY BARRA DI PROGRESSIONE IA */}
       {progressIA.active && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] bg-white rounded-2xl shadow-2xl border border-blue-200 p-4 w-[90%] max-w-md flex flex-col gap-3">
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] bg-white rounded-2xl shadow-2xl border border-slate-200 p-4 w-[90%] max-w-md flex flex-col gap-3">
            <div className="flex justify-between items-center">
-              <span className="text-xs font-bold text-slate-700 flex items-center gap-2"><Loader2 size={14} className="animate-spin text-blue-600"/> {progressIA.text}</span>
-              <span className="text-xs font-extrabold text-blue-700">{progressIA.percent}%</span>
+              <span className="text-xs font-bold text-slate-700 flex items-center gap-2"><Loader2 size={14} className="animate-spin text-slate-900"/> {progressIA.text}</span>
+              <span className="text-xs font-extrabold text-slate-900">{progressIA.percent}%</span>
            </div>
            <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-              <div className="bg-blue-600 h-full rounded-full transition-all duration-500 ease-out" style={{ width: `${progressIA.percent}%` }}></div>
+              <div className="bg-slate-900 h-full rounded-full transition-all duration-500 ease-out" style={{ width: `${progressIA.percent}%` }}></div>
            </div>
         </div>
       )}
 
-      <main className="w-full h-full overflow-y-auto custom-scrollbar p-6 md:p-10 print:p-0 print:overflow-visible relative">
-        <div className="w-full mx-auto">
-          
-          <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200 mb-8 gap-4 print:hidden">
+      {/* HEADER SUPERIORE COLLASSATO */}
+      <header className="w-full bg-white border-b border-slate-200 px-6 py-4 flex flex-col md:flex-row justify-between items-start md:items-center shrink-0 z-30 print:hidden">
+         <div className="flex items-center gap-4">
+            <div className="p-2.5 bg-slate-900 text-white rounded-xl shadow-sm"><Zap size={20} /></div>
             <div>
-              <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-slate-900 flex items-center gap-3">
-                <span className="p-2.5 bg-blue-600 text-white rounded-xl shadow-md"><Zap size={24} /></span>
-                Asso Antincendio <span className="text-blue-600 font-normal text-xl">| Smart Logistics</span>
+              <h1 className="text-xl font-extrabold tracking-tight text-slate-900">
+                Route Manager <span className="text-slate-400 font-normal">| Asso Antincendio</span>
               </h1>
-              <p className="text-xs text-slate-500 mt-1">Rubrica in memoria, Foglio Viaggio, Pausa Pranzo Dinamica & Assistente IA.</p>
             </div>
+         </div>
 
-            <div className="flex flex-col gap-2 w-full md:w-auto">
-              <div className="flex items-center gap-2">
-                <Link 
-                  href="/flussi" 
-                  className="px-4 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-sm w-full"
-                >
-                  📊 Gestione Flussi
-                </Link>
-              </div>
-
-              <div className="flex flex-col gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-2xl">
-                  <div className="flex items-center gap-2">
-                    {isCheckingAuth ? (
-                      <div className="text-slate-500 font-bold flex items-center justify-center gap-2 text-sm w-full py-2.5"><Loader2 size={18} className="animate-spin text-blue-600" /> Verifica...</div>
-                    ) : !googleToken ? (
-                      <button onClick={eseguiLoginGoogle} className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm text-sm w-full"><Calendar size={18} /> Avvia Connessione Google</button>
-                    ) : (
-                      <div className="flex items-center gap-2 w-full">
-                        <span className="bg-emerald-50 text-emerald-800 px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 border border-emerald-200 text-sm flex-1"><Check size={18} /> Calendar Connesso</span>
-                        <button onClick={logoutGoogle} className="bg-white hover:bg-red-50 text-slate-600 hover:text-red-600 px-3 py-2.5 rounded-xl border border-slate-200 shadow-sm shrink-0"><X size={18} /></button>
-                      </div>
-                    )}
-                  </div>
-                  
-                  <a 
-                    href="https://calendar.google.com" 
-                    target="_blank" 
-                    rel="noopener noreferrer" 
-                    className="bg-blue-100 text-blue-800 px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 border border-blue-200 shadow-sm text-xs transition-all hover:bg-blue-200"
-                  >
-                    <Phone size={16} /> Gestione Chiamate <ExternalLink size={14} className="opacity-60" />
-                  </a>
-              </div>
-              
-              {/* BOTTONI AFFIANCATI PER RUBRICA E INSOLUTI */}
-              <div className="flex gap-2 w-full">
-                  <label className={`flex-1 py-2.5 rounded-xl font-bold text-[11px] shadow-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer ${Object.keys(rubricaClienti).length > 0 ? 'bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-300'}`}>
-                    <Book size={14} />
-                    {Object.keys(rubricaClienti).length > 0 ? `Rubrica (${Object.keys(rubricaClienti).length})` : "Carica Rubrica"}
-                    <input type="file" accept=".xlsx, .xls, .csv, .txt" className="hidden" onChange={handleRubricaUpload} />
-                  </label>
-                  
-                  <label className="flex-1 py-2.5 rounded-xl font-bold text-[11px] shadow-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer bg-red-50 text-red-700 hover:bg-red-100 border border-red-200">
-                    <Banknote size={14} />
-                    Lista Insoluti
-                    <input type="file" accept=".xlsx, .xls, .csv" className="hidden" onChange={handleInsolutiUpload} />
-                  </label>
-              </div>
-            </div>
-          </header>
-
-          <div className="w-full mb-8 print:hidden">
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-               <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2 mb-5"><CheckCircle size={18} className="text-emerald-600" /> Riepilogo Pianificazione</h3>
-               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                 <div className="p-4 bg-blue-50 rounded-xl border border-blue-200 flex flex-col justify-center">
-                    <span className="block text-[11px] text-blue-700 font-bold uppercase tracking-wider mb-1">Totale In Carico</span>
-                    <span className="text-3xl font-extrabold text-blue-900">{totaleInCarico}</span>
-                 </div>
-                 <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100 flex flex-col justify-center">
-                    <span className="block text-[11px] text-emerald-700 font-bold uppercase tracking-wider mb-1">Nuovi in Rotta</span>
-                    <span className="text-3xl font-extrabold text-emerald-900">{clientiAttiviCount}</span>
-                 </div>
-                 <div className="p-4 bg-amber-50 rounded-xl border border-amber-100 flex flex-col justify-center">
-                    <span className="block text-[11px] text-amber-700 font-bold uppercase tracking-wider mb-1">Finiti in Sospeso</span>
-                    <span className="text-3xl font-extrabold text-amber-900">{clientiInSospeso.length}</span>
-                 </div>
-                 <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex flex-col justify-center">
-                    <span className="block text-[11px] text-slate-500 font-bold uppercase tracking-wider mb-1">Già Fatti / Scartati</span>
-                    <span className="text-3xl font-extrabold text-slate-700">{clientiGiaCalendarizzati.length}</span>
-                 </div>
-               </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8 print:hidden">
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between">
-              <div>
-                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2 mb-4"><Calendar className="text-blue-600" size={18} /> 1. Configura Periodo</h2>
-                <div className="grid grid-cols-2 gap-3 mb-4">
-                  <div><label className="text-[11px] font-bold text-slate-500 block mb-1">Dal</label><input type="date" value={dataInizio} onChange={(e) => setDataInizio(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold focus:outline-none" /></div>
-                  <div><label className="text-[11px] font-bold text-slate-500 block mb-1">Al</label><input type="date" value={dataFine} onChange={(e) => setDataFine(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold focus:outline-none" /></div>
-                </div>
-                <div className="flex flex-wrap gap-1.5 mb-4">
-                  {Object.keys(giorniAttivi).map((g) => <button key={g} onClick={() => toggleGiornoAttivo(g)} className={`px-2.5 py-1 rounded-lg text-xs font-bold ${giorniAttivi[g] ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400 line-through'}`}>{g.slice(0, 3)}</button>)}
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
-               <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center bg-slate-50 flex flex-col items-center justify-center transition-all hover:border-blue-400 mb-4 h-full relative">
-                 <div className="p-2 bg-blue-100 text-blue-600 rounded-xl mb-1"><FileSpreadsheet size={20} /></div>
-                 <h2 className="text-sm font-bold text-slate-800 mb-1 truncate px-2 w-full max-w-[200px]" title={nomeFileCorrente}>{datiGrezziCaricati.length > 0 ? nomeFileCorrente : "Carica file cantieri"}</h2>
-                 <label className={`bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-xl font-bold text-xs shadow-md transition-all inline-block mt-1 ${!googleToken ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
-                   {datiGrezziCaricati.length > 0 ? "Sostituisci" : "Sfoglia"}
-                   <input type="file" accept=".xlsx, .xls, .csv, .txt" className="hidden" onChange={handleFileUpload} disabled={!googleToken} />
-                 </label>
-               </div>
-
-               <div className="border-t border-slate-100 pt-3 mt-3 flex flex-col gap-1.5">
-                 <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1"><UserCheck size={14} className="text-blue-600"/> 2. Tecnico Operativo</label>
-                 <select value={tecnicoSelezionato.nome} onChange={(e) => { const t = tecniciAnagrafica.find(t => t.nome === e.target.value); if(t) setTecnicoSelezionato(t); }} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-bold text-slate-800 focus:outline-none cursor-pointer">
+         <div className="flex items-center gap-3 mt-4 md:mt-0">
+             <div className="flex items-center gap-2">
+                 <select value={tecnicoSelezionato.nome} onChange={(e) => { const t = tecniciAnagrafica.find(t => t.nome === e.target.value); if(t) setTecnicoSelezionato(t); }} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none cursor-pointer">
                     {tecniciAnagrafica.map((t, idx) => <option key={idx} value={t.nome}>{t.nome}</option>)}
                  </select>
-               </div>
-            </div>
+             </div>
+             
+             <label className={`cursor-pointer px-4 py-2 rounded-xl font-bold text-xs shadow-sm border transition-all flex items-center gap-2 ${datiGrezziCaricati.length > 0 ? 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50' : 'bg-slate-900 text-white border-slate-900 hover:bg-slate-800'}`}>
+                 <FileSpreadsheet size={16} /> {datiGrezziCaricati.length > 0 ? "File Caricato" : "Carica Excel"}
+                 <input type="file" accept=".xlsx, .xls, .csv, .txt" className="hidden" onChange={handleFileUpload} disabled={!googleToken} />
+             </label>
 
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between items-center text-center">
-               <div className="w-full flex flex-col gap-3 h-full justify-center">
-                   <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center justify-center gap-2 mb-2"><PlayCircle className="text-emerald-600" size={18} /> 3. Genera Plancia</h2>
-                   <p className="text-[11px] text-slate-500 mb-2">Lascia che l'Intelligenza Artificiale pianifichi i giri incrociando cantieri, ancore e limiti orari.</p>
-                   <button
-                     onClick={() => processaRighe(datiGrezziCaricati)}
-                     disabled={datiGrezziCaricati.length === 0 || inElaborazione}
-                     className={`w-full py-4 rounded-xl text-sm font-extrabold transition-all flex items-center justify-center gap-2 ${(datiGrezziCaricati.length > 0 && !inElaborazione) ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-md' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
-                   >
-                     {inElaborazione ? <><Loader2 size={16} className="animate-spin"/> IA in elaborazione...</> : <><Sliders size={16} /> Analizza & Popola la Board</>}
-                   </button>
-               </div>
-            </div>
-          </div>
+             <button
+                 onClick={() => processaRighe(datiGrezziCaricati)}
+                 disabled={datiGrezziCaricati.length === 0 || inElaborazione}
+                 className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm ${(datiGrezziCaricati.length > 0 && !inElaborazione) ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'}`}
+             >
+                 {inElaborazione ? <Loader2 size={16} className="animate-spin"/> : <PlayCircle size={16} />} Genera Rotte
+             </button>
+             
+             {!googleToken ? (
+                 <button onClick={eseguiLoginGoogle} className="bg-white hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-xl font-bold border border-slate-300 shadow-sm text-xs flex items-center gap-2"><Calendar size={16} /> Connetti Google</button>
+             ) : (
+                 <button onClick={inviaPianificazioneAGoogle} disabled={bulkSyncStatus.active || globaleAssegnati.filter(i=>!i.syncedToGoogle).length === 0} className="bg-white hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-xl font-bold border border-slate-300 shadow-sm text-xs flex items-center gap-2 disabled:opacity-50">
+                     {bulkSyncStatus.active ? <Loader2 size={16} className="animate-spin"/> : <UploadCloud size={16} />} Salva Calendario
+                 </button>
+             )}
+         </div>
+      </header>
 
-          <div className={`mb-10 relative print:hidden ${inElaborazione ? 'opacity-50 pointer-events-none' : ''}`}>
-               {interventiGrezzi.length > 0 && (
-                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                       <div>
-                          <h2 className="text-xl font-extrabold text-slate-900 flex items-center gap-2"><GripVertical className="text-blue-600" /> Plancia Operativa Settimanale</h2>
-                          <p className="text-xs text-slate-500">Usa le ⇄ per spostare rapidamente i cantieri, oppure trascinali liberamente tra le colonne.</p>
-                       </div>
-                       <div className="flex gap-4">
-                           {bulkSyncStatus.active ? (
-                                <div className="bg-blue-50 border border-blue-200 px-4 py-2.5 rounded-xl flex items-center gap-3 text-xs font-bold text-blue-800">
-                                    <Loader2 size={14} className="animate-spin"/> Sync a Calendar... {bulkSyncStatus.current} / {bulkSyncStatus.total}
-                                </div>
-                            ) : (
-                                <button onClick={inviaPianificazioneAGoogle} className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md text-xs transition-all">
-                                    <UploadCloud size={16} /> Salva su Google Calendar ({globaleAssegnati.filter(i=>!i.syncedToGoogle).length})
-                                </button>
-                           )}
-                       </div>
-                   </div>
-               )}
+      <div className="flex-1 flex flex-col overflow-hidden">
+          {/* BARRA DEI TAB (GIORNI) */}
+          {interventiGrezzi.length > 0 && (
+              <div className="bg-white border-b border-slate-200 px-6 py-2 flex items-center gap-2 overflow-x-auto shrink-0 custom-scrollbar z-20">
+                  <button 
+                      onClick={() => setGiornoSceltoFiltro("sospesi")}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-xs transition-colors whitespace-nowrap ${giornoSceltoFiltro === "sospesi" ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+                  >
+                      <PauseCircle size={14} /> Sospesi <span className={`px-1.5 py-0.5 rounded text-[10px] ${giornoSceltoFiltro === "sospesi" ? 'bg-slate-700 text-white' : 'bg-slate-200 text-slate-600'}`}>{clientiInSospeso.length}</span>
+                  </button>
+                  
+                  <div className="w-px h-6 bg-slate-200 mx-2"></div>
+                  
+                  {giornateStats.map(g => {
+                      const isOvertime = g.orarioFineMinuti > 1080;
+                      return (
+                          <button 
+                              key={g.dataStr}
+                              onClick={() => setGiornoSceltoFiltro(g.dataStr)}
+                              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-xs transition-colors whitespace-nowrap border ${giornoSceltoFiltro === g.dataStr ? 'bg-white border-slate-300 shadow-sm text-slate-900' : 'bg-transparent border-transparent text-slate-500 hover:bg-slate-50'}`}
+                          >
+                              {g.nomeGiorno} {formattaDataVisuale(g.dataStr).slice(0,5)}
+                              {isOvertime && <AlertOctagon size={12} className="text-red-500" />}
+                          </button>
+                      );
+                  })}
+              </div>
+          )}
 
-               {interventiGrezzi.length > 0 && (
-                   <div className="flex items-start gap-4 pb-4 w-full">
-                       <div 
-                           className="min-w-[320px] max-w-[320px] h-[70vh] min-h-[500px] max-h-[800px] bg-slate-200 border-2 border-slate-300 rounded-3xl p-4 flex flex-col shrink-0 z-20 shadow-xl"
-                           onDragOver={handleDragOverKanban}
-                           onDrop={handleDropToSospesi}
-                       >
-                           <h3 className="font-extrabold text-slate-800 mb-4 flex justify-between items-center px-1">
-                               <span className="flex items-center gap-1.5"><PauseCircle size={16}/> SOSPESI</span>
-                               <span className="bg-slate-800 text-white px-2.5 py-0.5 rounded-full text-[10px] shadow-sm">{clientiInSospeso.length}</span>
-                           </h3>
-                           <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-                               {clientiInSospeso.map(item => (
+          {/* SPLIT SCREEN CONTENUTO */}
+          {interventiGrezzi.length > 0 ? (
+              <div className="flex-1 flex overflow-hidden">
+                  
+                  {/* PANNELLO SINISTRO: LISTA CANTIERI */}
+                  <div className="w-full md:w-[45%] lg:w-[40%] h-full bg-white border-r border-slate-200 flex flex-col z-10">
+                      
+                      {/* HEADER LISTA */}
+                      <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center shrink-0">
+                          <div>
+                              <h2 className="font-extrabold text-slate-900 text-sm">
+                                  {giornoSceltoFiltro === "sospesi" ? "Cantieri in Sospeso" : `${statGiornoAttivo?.nomeGiorno} ${formattaDataVisuale(giornoSceltoFiltro)}`}
+                              </h2>
+                              <p className="text-[10px] text-slate-500 font-medium mt-0.5">
+                                  {listaAttiva.length} interventi totali
+                              </p>
+                          </div>
+                          {statGiornoAttivo && (
+                              <div className="text-right">
+                                  <span className={`text-[10px] font-bold px-2 py-1 rounded ${statGiornoAttivo.orarioFineMinuti > 1080 ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-slate-100 text-slate-700 border border-slate-200'}`}>
+                                      Fine stimata: {String(Math.floor(statGiornoAttivo.orarioFineMinuti / 60)).padStart(2, '0')}:{String(Math.floor(statGiornoAttivo.orarioFineMinuti % 60)).padStart(2, '0')}
+                                  </span>
+                              </div>
+                          )}
+                      </div>
+
+                      {/* LISTA SCORREVOLE */}
+                      <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar" onDragOver={handleDragOverKanban} onDrop={(e) => handleDropToDay(e, giornoSceltoFiltro === "sospesi" ? null : giornoSceltoFiltro)}>
+                          {listaAttiva.length === 0 ? (
+                              <div className="flex flex-col items-center justify-center h-40 text-slate-400">
+                                  <List size={32} className="mb-2 opacity-50" />
+                                  <p className="text-xs font-bold">Nessun cantiere presente</p>
+                                  <p className="text-[10px]">Trascina o sposta cantieri qui</p>
+                              </div>
+                          ) : (
+                              listaAttiva.map((item, idx) => (
                                   <div 
-                                      key={item.codice} 
-                                      draggable={!(item.resoEstintori && item.giorniDallUltimoSos < 5)}
+                                      key={item.codice}
+                                      draggable={!(item.resoEstintori && item.giorniDallUltimoSos < 5) && !item.isPregresso && !item.isDistinta}
                                       onDragStart={(e) => handleDragStartKanban(e, item.codice)}
-                                      onClick={() => !(item.resoEstintori && item.giorniDallUltimoSos < 5) && apriModaleSospeso(item)}
-                                      className={`bg-white border px-2 py-1.5 rounded-lg shadow-sm flex flex-col gap-0.5 transition-all ${(item.resoEstintori && item.giorniDallUltimoSos < 5) ? 'border-red-300 bg-red-50/40 opacity-70 cursor-not-allowed' : 'border-amber-200 hover:border-blue-400 hover:shadow-md cursor-grab active:cursor-grabbing relative'}`}
+                                      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverCard(item.codice); }}
+                                      onDragLeave={() => setDragOverCard(null)}
+                                      onDrop={(e) => handleDropToDay(e, giornoSceltoFiltro === "sospesi" ? null : giornoSceltoFiltro, item.codice)}
+                                      className={`group relative flex items-center p-2 rounded-lg border transition-all bg-white
+                                          ${dragOverCard === item.codice ? 'border-t-2 border-t-slate-900 mt-1' : 'border-slate-200'}
+                                          ${item.isPregresso ? 'bg-slate-50 border-slate-200 cursor-not-allowed' : item.isDistinta ? 'bg-slate-50 border-slate-200 cursor-default' : 'hover:border-slate-400 cursor-grab active:cursor-grabbing hover:shadow-sm'}
+                                      `}
                                   >
-                                      <div className="flex justify-between items-center w-full pr-[60px]">
-                                          <div className="flex items-center gap-1 overflow-hidden">
-                                              <span className="bg-amber-100 text-amber-900 font-mono text-[8px] px-1.5 py-0.5 rounded font-bold shrink-0">BI: {item.numeroBi}</span>
-                                              <span className="font-bold text-slate-900 text-[10px] truncate">{item.nome}</span>
+                                      {/* NUMERINO (Se non sospeso) */}
+                                      {giornoSceltoFiltro !== "sospesi" && !item.isDistinta && (
+                                          <div className="w-6 shrink-0 flex justify-center">
+                                              <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center text-[9px] font-bold border border-slate-200">
+                                                  {idx + (listaAttiva[0]?.isDistinta ? 0 : 1)}
+                                              </span>
                                           </div>
-                                          <div className="flex items-center gap-1 shrink-0">
-                                              {item.resoEstintori && <span className="text-amber-600" title="SOS"><AlertTriangle size={10}/></span>}
-                                              <span className="text-[9px] font-bold bg-slate-100 text-slate-600 px-1 rounded">{item.minutiLavoro}m</span>
+                                      )}
+
+                                      {/* CORPO DELLA RIGA */}
+                                      <div className="flex-1 min-w-0 pl-2 pr-16 flex flex-col justify-center">
+                                          <div className="flex items-center gap-2">
+                                              {/* ORARIO o BADGE */}
+                                              {item.isDistinta ? (
+                                                  <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">MAGAZZINO</span>
+                                              ) : item.isPregresso ? (
+                                                  <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded flex items-center gap-1"><Lock size={8}/> TASSATIVO</span>
+                                              ) : giornoSceltoFiltro !== "sospesi" ? (
+                                                  <span className="text-[10px] font-mono font-bold text-slate-900">{item.oraInizio}</span>
+                                              ) : (
+                                                  <span className="text-[9px] font-mono font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">BI:{item.numeroBi}</span>
+                                              )}
+                                              
+                                              {/* NOME CLIENTE */}
+                                              <span className={`text-[11px] font-bold truncate ${item.isPregresso || item.isDistinta ? 'text-slate-600' : 'text-slate-900'}`}>{item.nome}</span>
+                                              
+                                              {/* ALERT ICONS */}
+                                              {item.resoEstintori && <span className="text-orange-500 shrink-0" title="Reso Estintori"><AlertTriangle size={12}/></span>}
+                                              {item.haInsoluto && <span className="text-red-500 shrink-0" title="Insoluto"><AlertCircle size={12}/></span>}
                                           </div>
-                                      </div>
-                                      <div className="flex items-center justify-between mt-0.5 pr-[60px]">
-                                          <p className="text-[9px] text-slate-500 font-medium truncate w-full">
-                                              <MapPin size={8} className="inline mr-0.5"/>
-                                              {item.indirizzo}, {item.cap ? item.cap + ' ' : ''}{item.localita}
-                                          </p>
-                                      </div>
-                                      
-                                      {/* BOTTONI AZIONE SOSPESI */}
-                                      <div className="absolute top-1/2 -translate-y-1/2 right-1 flex items-center gap-1">
-                                          <div className="relative">
-                                              <button onClick={(e) => { e.stopPropagation(); setMenuAperto(menuAperto === item.codice ? null : item.codice); }} className="text-slate-400 hover:text-blue-600 p-1.5 rounded-md transition-colors bg-slate-50 border border-slate-200 shadow-sm cursor-pointer">
-                                                  <ArrowRightLeft size={12}/>
-                                              </button>
-                                              {menuAperto === item.codice && (
-                                                  <div className="absolute top-full right-0 mt-1 bg-white border border-slate-200 shadow-xl rounded-lg p-1 z-[99] w-32">
-                                                      <div className="text-[9px] font-bold text-slate-400 px-2 py-1 uppercase">Pianifica in...</div>
-                                                      {giornateStats.map(gs => (
-                                                          <button key={gs.dataStr} onClick={(e) => { e.stopPropagation(); spostaCantiereRapido(item.codice, gs.dataStr); }} className="w-full text-left px-2 py-1.5 text-[10px] font-bold text-slate-700 hover:bg-blue-50 rounded transition-colors cursor-pointer">
-                                                              {gs.nomeGiorno} {formattaDataVisuale(gs.dataStr).slice(0,5)}
-                                                          </button>
-                                                      ))}
-                                                  </div>
+                                          
+                                          {/* SECONDA RIGA: INDIRIZZO E DETTAGLI */}
+                                          <div className="flex items-center justify-between mt-0.5 opacity-70">
+                                              <span className="text-[9px] font-medium text-slate-500 truncate w-2/3">
+                                                  {item.indirizzo}, {item.localita}
+                                              </span>
+                                              {!item.isPregresso && !item.isDistinta && (
+                                                  <span className="text-[9px] font-bold text-slate-500 shrink-0">
+                                                      {item.minutiLavoro}m
+                                                  </span>
                                               )}
                                           </div>
-                                          <button onClick={(e) => { e.stopPropagation(); setClienteSelezionatoScheda(item); }} className="text-slate-400 hover:text-blue-600 p-1.5 rounded-md transition-colors bg-slate-50 border border-slate-200 shadow-sm cursor-pointer">
+                                      </div>
+
+                                      {/* AZIONI (Appaiono On Hover) */}
+                                      <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                          {!item.isPregresso && !item.isDistinta && (
+                                              <div className="relative">
+                                                  <button onClick={(e) => { e.stopPropagation(); setMenuAperto(menuAperto === item.codice ? null : item.codice); }} className="text-slate-500 hover:text-slate-900 p-1.5 rounded-md hover:bg-slate-100 transition-colors cursor-pointer bg-white shadow-sm border border-slate-200">
+                                                      <ArrowRightLeft size={12}/>
+                                                  </button>
+                                                  {menuAperto === item.codice && (
+                                                      <div className="absolute top-full right-0 mt-1 bg-white border border-slate-200 shadow-xl rounded-lg p-1 z-[99] w-32">
+                                                          <div className="text-[9px] font-bold text-slate-400 px-2 py-1 uppercase">Sposta a...</div>
+                                                          {giornateStats.map(gs => (
+                                                              <button key={gs.dataStr} onClick={(e) => { e.stopPropagation(); spostaCantiereRapido(item.codice, gs.dataStr); }} className="w-full text-left px-2 py-1.5 text-[10px] font-bold text-slate-700 hover:bg-slate-50 rounded transition-colors cursor-pointer">
+                                                                  {gs.nomeGiorno} {formattaDataVisuale(gs.dataStr).slice(0,5)}
+                                                              </button>
+                                                          ))}
+                                                          <div className="border-t border-slate-100 my-1"></div>
+                                                          <button onClick={(e) => { e.stopPropagation(); spostaCantiereRapido(item.codice, null); }} className="w-full text-left px-2 py-1.5 text-[10px] font-bold text-slate-700 hover:bg-slate-50 rounded transition-colors cursor-pointer">
+                                                              Sospesi
+                                                          </button>
+                                                      </div>
+                                                  )}
+                                              </div>
+                                          )}
+                                          <button onClick={(e) => { e.stopPropagation(); setClienteSelezionatoScheda(item); }} className="text-slate-500 hover:text-slate-900 p-1.5 rounded-md hover:bg-slate-100 transition-colors cursor-pointer bg-white shadow-sm border border-slate-200">
                                               <FileText size={12}/>
                                           </button>
                                       </div>
                                   </div>
-                               ))}
-                               {clientiInSospeso.length === 0 && <div className="text-center text-xs text-slate-400 mt-10 font-bold border-2 border-dashed border-slate-300 p-4 rounded-xl">Nessun sospeso. Trascina qui le schede da scartare.</div>}
-                           </div>
-                       </div>
-
-                       <div className="flex overflow-x-auto items-start gap-4 pb-4 w-full snap-x custom-scrollbar h-[70vh] min-h-[500px] max-h-[800px]">
-                           {giornateStats.map(g => {
-                               const taskGiorno = interventiGrezzi.filter(i => i.selezionatoPerGiro && i.dataAssegnata === g.dataStr);
-                               const isOvertime = g.orarioFineMinuti > 1080; // > 18:00
-                               const hh = String(Math.floor(g.orarioFineMinuti / 60)).padStart(2, '0');
-                               const mm = String(Math.floor(g.orarioFineMinuti % 60)).padStart(2, '0');
-
-                               return (
-                                 <div 
-                                     key={g.dataStr}
-                                     className={`min-w-[340px] max-w-[340px] h-full bg-slate-50 border-2 rounded-3xl p-4 flex flex-col snap-start shrink-0 transition-all ${isOvertime ? 'border-red-400 shadow-[0_0_20px_rgba(239,68,68,0.15)] bg-red-50/50' : 'border-slate-200 shadow-sm'}`}
-                                     onDragOver={handleDragOverKanban}
-                                     onDrop={(e) => handleDropToDay(e, g.dataStr)}
-                                 >
-                                     <div className="mb-4 pb-4 border-b border-slate-200 px-1">
-                                         <div className="flex justify-between items-start mb-2">
-                                             <h3 className="font-extrabold text-slate-900 text-lg uppercase tracking-tight">{g.nomeGiorno}</h3>
-                                             <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-1 rounded-lg">{formattaDataVisuale(g.dataStr)}</span>
-                                         </div>
-                                         
-                                         {isOvertime ? (
-                                             <div className="bg-red-100 text-red-800 text-[11px] font-bold px-2.5 py-1.5 rounded-lg flex items-center justify-between shadow-sm">
-                                                 <span className="flex items-center gap-1.5"><AlertOctagon size={14}/> OVERTIME TURNO:</span>
-                                                 <span className="text-sm">{hh}:{mm}</span>
-                                             </div>
-                                         ) : (
-                                             <div className="bg-emerald-100 text-emerald-800 text-[11px] font-bold px-2.5 py-1.5 rounded-lg flex items-center justify-between shadow-sm">
-                                                 <span className="flex items-center gap-1.5"><CheckCircle size={14}/> Fine turno stimata:</span>
-                                                 <span className="text-sm">{hh}:{mm}</span>
-                                             </div>
-                                         )}
-                                     </div>
-                                     
-                                     <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-                                         {taskGiorno.length === 0 && <div className="text-center text-xs text-slate-400 mt-10 font-bold border-2 border-dashed border-slate-200 p-4 rounded-xl">Giorno vuoto. Trascina qui le schede.</div>}
-                                         {taskGiorno.map(item => (
-                                            <div 
-                                                key={item.codice}
-                                                draggable={!item.isPregresso && !item.isDistinta}
-                                                onDragStart={(e) => handleDragStartKanban(e, item.codice)}
-                                                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverCard(item.codice); }}
-                                                onDragLeave={() => setDragOverCard(null)}
-                                                onDrop={(e) => handleDropToDay(e, g.dataStr, item.codice)}
-                                                className={`px-2 py-1.5 rounded-lg border bg-white shadow-sm text-left relative transition-all flex flex-col gap-0.5
-                                                    ${dragOverCard === item.codice ? 'border-t-4 border-t-blue-500 mt-2' : ''}
-                                                    ${item.isPregresso ? 'border-indigo-200 bg-indigo-50/50 cursor-not-allowed' : item.isDistinta ? 'border-orange-200 bg-orange-50/50 cursor-default' : 'border-slate-200 hover:border-blue-400 cursor-grab active:cursor-grabbing'}
-                                                `}
-                                            >
-                                               <div className="flex items-center gap-1.5 w-full pr-[60px]">
-                                                  {!item.isDistinta && (
-                                                      <span className="text-[9px] font-mono font-bold text-slate-600 shrink-0">{item.oraInizio}</span>
-                                                  )}
-                                                  {item.isDistinta ? (
-                                                    <span className="bg-orange-100 text-orange-800 text-[8px] font-extrabold px-1.5 py-0.5 rounded flex items-center gap-1 shrink-0"><Package size={8}/> MAGAZZINO</span>
-                                                  ) : item.isPregresso ? (
-                                                    <span className="bg-indigo-100 text-indigo-800 text-[8px] font-extrabold px-1.5 py-0.5 rounded flex items-center gap-1 shrink-0"><CalendarPlus size={8}/> PREGRESSO</span>
-                                                  ) : (
-                                                    <span className="bg-slate-100 text-slate-700 text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border border-slate-200 shrink-0">BI:{item.numeroBi}</span>
-                                                  )}
-                                                  <span className={`font-bold text-[10px] truncate ${item.isDistinta ? 'text-orange-900' : 'text-slate-900'}`}>{item.nome}</span>
-                                               </div>
-                                               
-                                               <div className="flex justify-between items-center mt-0.5 pr-[60px]">
-                                                   <p className="text-[9px] text-slate-500 font-medium truncate w-full">
-                                                      <MapPin size={8} className="inline mr-0.5"/>
-                                                      {item.indirizzo}, {item.cap ? item.cap + ' ' : ''}{item.localita}
-                                                   </p>
-                                                   <div className="flex items-center gap-1 shrink-0">
-                                                      {item.resoEstintori && <span className="text-amber-600" title="SOS"><AlertTriangle size={10}/></span>}
-                                                      {!item.isPregresso && !item.isDistinta && <span className="bg-emerald-50 text-emerald-700 px-1 rounded text-[9px] font-extrabold border border-emerald-200">{item.minutiLavoro}m</span>}
-                                                   </div>
-                                               </div>
-                                               
-                                               {!item.isPregresso && !item.isDistinta && (
-                                                   <div className="flex items-center text-[8.5px] font-medium text-blue-600 truncate mt-0.5 pr-[60px]">
-                                                     {item.dettaglioAttrezzature?.length > 0 
-                                                        ? item.dettaglioAttrezzature.map((a:any) => a.descrizione.split(" ")[0]).join(", ") 
-                                                        : "Intervento standard"}
-                                                   </div>
-                                               )}
-
-                                               {/* BOTTONI AZIONE PIANIFICATI */}
-                                               <div className="absolute top-1/2 -translate-y-1/2 right-1 flex items-center gap-1">
-                                                   {!item.isPregresso && !item.isDistinta && (
-                                                       <div className="relative">
-                                                           <button onClick={(e) => { e.stopPropagation(); setMenuAperto(menuAperto === item.codice ? null : item.codice); }} className="text-slate-400 hover:text-blue-600 p-1.5 rounded-md transition-colors bg-slate-50 border border-slate-200 shadow-sm cursor-pointer">
-                                                               <ArrowRightLeft size={12}/>
-                                                           </button>
-                                                           {menuAperto === item.codice && (
-                                                               <div className="absolute top-full right-0 mt-1 bg-white border border-slate-200 shadow-xl rounded-lg p-1 z-[99] w-32">
-                                                                   <div className="text-[9px] font-bold text-slate-400 px-2 py-1 uppercase">Sposta a...</div>
-                                                                   {giornateStats.map(gs => (
-                                                                       <button key={gs.dataStr} onClick={(e) => { e.stopPropagation(); spostaCantiereRapido(item.codice, gs.dataStr); }} className="w-full text-left px-2 py-1.5 text-[10px] font-bold text-slate-700 hover:bg-blue-50 rounded transition-colors cursor-pointer">
-                                                                           {gs.nomeGiorno} {formattaDataVisuale(gs.dataStr).slice(0,5)}
-                                                                       </button>
-                                                                   ))}
-                                                                   <div className="border-t border-slate-100 my-1"></div>
-                                                                   <button onClick={(e) => { e.stopPropagation(); spostaCantiereRapido(item.codice, null); }} className="w-full text-left px-2 py-1.5 text-[10px] font-bold text-amber-700 hover:bg-amber-50 rounded transition-colors cursor-pointer">
-                                                                       Sospesi
-                                                                   </button>
-                                                               </div>
-                                                           )}
-                                                       </div>
-                                                   )}
-                                                   <button onClick={(e) => { e.stopPropagation(); setClienteSelezionatoScheda(item); }} className="text-slate-400 hover:text-blue-600 p-1.5 rounded-md transition-colors bg-slate-50 border border-slate-200 shadow-sm cursor-pointer">
-                                                       <FileText size={12}/>
-                                                   </button>
-                                               </div>
-                                            </div>
-                                         ))}
-                                     </div>
-                                 </div>
-                               )
-                           })}
-                       </div>
-                   </div>
-               )}
-          </div>
-
-          {/* MAPPA IN BASSO CON FILTRI ACCORPATI */}
-          {interventiGrezzi.length > 0 && leafletLoaded && (
-            <div className="w-full flex flex-col gap-6 mb-8 print:hidden">
-              <div className={`bg-white p-6 rounded-2xl shadow-sm border border-slate-200 ${inElaborazione ? 'opacity-50 pointer-events-none' : ''}`}>
-                
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 border-b border-slate-100 pb-4">
-                  <h3 className="text-lg font-extrabold flex items-center gap-2 text-slate-900"><MapPin className="text-red-500" /> Mappa Globale Cantieri</h3>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider hidden md:block">Filtra per giornata:</span>
-                    <button onClick={() => setGiornoSceltoFiltro("Tutti")} className={`text-xs px-4 py-2 rounded-lg font-bold transition-all ${giornoSceltoFiltro === "Tutti" ? "bg-blue-600 text-white shadow-md" : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"}`}>Mostra Tutti</button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6">
-                  {giornateStats.map((g, idx) => {
-                    const minVal = g.orarioFineMinuti || g.orarioPartenzaMinuti || 480;
-                    const isOvertime = minVal > 1080;
-                    const hh = String(Math.floor(minVal / 60)).padStart(2, '0');
-                    const mm = String(Math.floor(minVal % 60)).padStart(2, '0');
-                    
-                    return (
-                      <div key={idx} onClick={() => setGiornoSceltoFiltro(g.dataStr)} className={`p-3 border rounded-xl flex flex-col gap-0.5 cursor-pointer transition-all ${isOvertime ? 'bg-red-50/50 border-red-200 hover:bg-red-100' : 'bg-emerald-50/50 border-emerald-200 hover:bg-emerald-100'} ${giornoSceltoFiltro === g.dataStr ? 'ring-2 ring-blue-500 shadow-md scale-[1.02]' : 'opacity-80 hover:opacity-100'}`}>
-                        <span className="text-[12px] font-bold text-slate-800">{formattaDataVisuale(g.dataStr)}</span>
-                        <span className="text-[10px] text-slate-500">{g.nomeGiorno}</span>
-                        <div className="flex items-center gap-1.5 mt-1.5 font-mono text-[10px]">
-                           {isOvertime ? <AlertOctagon size={12} className="text-red-500" /> : <CheckCircle size={12} className="text-emerald-500" />}
-                           <span className={isOvertime ? "text-red-700 font-bold" : "text-emerald-700 font-bold"}>
-                              Fine st.: {hh}:{mm}
-                           </span>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-
-                <div className="h-[480px] w-full rounded-xl overflow-hidden z-0 border border-slate-100 relative">
-                  <MapContainer key={giornoSceltoFiltro} center={[SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG]} zoom={11} style={{ height: "100%", width: "100%" }}>
-                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                    {interventiGrezzi.filter(i => (giornoSceltoFiltro === "Tutti" || i.dataAssegnata === giornoSceltoFiltro) && i.lat && i.lng && !i.isDistinta && i.selezionatoPerGiro).map((c, idx) => (
-                      <Marker key={c.codice} position={[c.lat, c.lng]} icon={createNumberedIcon(idx + 1)}>
-                        <Popup>
-                          <div className="p-2">
-                            <p className="font-bold text-sm text-slate-900">{c.nome}</p>
-                          </div>
-                        </Popup>
-                      </Marker>
-                    ))}
-                  </MapContainer>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* MODALI IN Z-INDEX MASSIMO Z-[9999] */}
-          {sospesoInModifica && (
-            <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[9999] flex items-center justify-center p-4">
-              <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-8 relative border border-slate-200">
-                <button onClick={() => setSospesoInModifica(null)} className="absolute top-6 right-6 text-slate-400 bg-slate-100 p-2 rounded-full hover:bg-slate-200"><X size={18} /></button>
-                <div className="mb-6">
-                   <div className="p-3 bg-amber-100 text-amber-600 rounded-xl inline-block mb-4"><PauseCircle size={24} /></div>
-                   <h2 className="text-xl font-extrabold text-slate-900 leading-tight">Pianifica Sospeso</h2>
-                   <p className="text-xs text-slate-500 mt-1">{sospesoInModifica.nome}</p>
-                </div>
-                <div className="flex flex-col gap-4 mb-6">
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Data assegnazione</label>
-                    <input type="date" value={configSospesoSingolo.data} onChange={(e) => setConfigSospesoSingolo({...configSospesoSingolo, data: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-semibold text-slate-800 focus:outline-none" />
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Ora Inizio stimata</label>
-                    <input type="time" value={configSospesoSingolo.oraInizio} onChange={(e) => setConfigSospesoSingolo({...configSospesoSingolo, oraInizio: e.target.value})} className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-sm font-semibold text-slate-800 focus:outline-none" />
-                  </div>
-                </div>
-                <div className="flex flex-col gap-2.5">
-                   <button onClick={() => creaSospesoDaModale('calendar')} disabled={creazioneInCorso[sospesoInModifica.codice]} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 shadow-md transition-all">
-                      {creazioneInCorso[sospesoInModifica.codice] ? (
-                        <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin"/> Invio in corso...</span>
-                      ) : (
-                        <span className="flex items-center gap-2"><CalendarPlus size={16}/> Crea su Calendar</span>
-                      )}
-                   </button>
-                   <button onClick={() => creaSospesoDaModale('lista')} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-3.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all"><CheckSquare size={16}/> Aggiungi solo in Lista</button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {clienteSelezionatoScheda && (
-            <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[9999] flex items-center justify-center p-4 overflow-y-auto">
-              <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-8 relative border border-slate-200 my-auto max-h-[90vh] flex flex-col">
-                <button onClick={() => setClienteSelezionatoScheda(null)} className="absolute top-6 right-6 text-slate-400 bg-slate-100 p-2.5 rounded-full hover:bg-slate-200"><X size={20} /></button>
-                
-                {clienteSelezionatoScheda.isDistinta ? (
-                  <>
-                    <div className="flex items-center gap-4 mb-6">
-                      <div className="p-4 bg-orange-100 text-orange-600 rounded-2xl"><Package size={32} /></div>
-                      <div>
-                        <span className="bg-orange-100 text-orange-800 font-mono text-xs px-3 py-1 rounded-xl font-bold mb-1 inline-block">REPORT MAGAZZINO</span>
-                        <h2 className="text-xl font-extrabold text-slate-900">Distinta di Carico</h2>
-                      </div>
-                    </div>
-                    <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 text-sm whitespace-pre-wrap font-mono leading-relaxed mb-6 overflow-y-auto flex-1">
-                      {clienteSelezionatoScheda.descrizioneDistinta}
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-4 mb-6 pb-4 border-b border-slate-100">
-                      <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl"><FileText size={32} /></div>
-                      <div>
-                        <div className="flex gap-2 mb-1">
-                           <span className="bg-blue-100 text-blue-800 font-mono text-xs px-3 py-1 rounded-xl font-bold">BI: {clienteSelezionatoScheda.numeroBi}</span>
-                           {clienteSelezionatoScheda.haInsoluto && <span className="bg-red-100 text-red-800 font-mono text-xs px-3 py-1 rounded-xl font-bold">INSOLUTO [INS]</span>}
-                           {clienteSelezionatoScheda.resoEstintori && <span className="bg-amber-100 text-amber-800 font-mono text-xs px-3 py-1 rounded-xl font-bold">SOS [ESTINTORI]</span>}
-                        </div>
-                        <h2 className="text-2xl font-extrabold text-slate-900">{clienteSelezionatoScheda.nome}</h2>
-                        <p className="text-xs text-slate-500 font-medium mt-0.5">{clienteSelezionatoScheda.indirizzo}, {clienteSelezionatoScheda.localita}</p>
-                      </div>
-                    </div>
-
-                    <div className="space-y-4 overflow-y-auto pr-2 flex-1 mb-6">
-                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200 text-xs">
-                          <div><strong className="text-slate-500 block mb-0.5">Referente / Contatto:</strong> <span className="font-bold text-slate-900">{clienteSelezionatoScheda.contatto || "Nessun referente specificato"}</span></div>
-                          <div><strong className="text-slate-500 block mb-0.5">Telefono:</strong> <span className="font-bold text-slate-900">{clienteSelezionatoScheda.telefono || "Nessun telefono"}</span></div>
-                          <div className="col-span-2"><strong className="text-slate-500 block mb-0.5">Email:</strong> <span className="font-bold text-slate-900">{clienteSelezionatoScheda.email || "Nessuna email"}</span></div>
-                       </div>
-
-                       <div>
-                          <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider mb-2">Attrezzature da Verificare ({clienteSelezionatoScheda.totaleArticoli || 0} pz):</h4>
-                          {clienteSelezionatoScheda.dettaglioAttrezzature && clienteSelezionatoScheda.dettaglioAttrezzature.length > 0 ? (
-                             <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
-                                {clienteSelezionatoScheda.dettaglioAttrezzature.map((att: any, idx: number) => (
-                                   <div key={idx} className="p-3 flex justify-between items-center bg-white text-xs">
-                                      <span className="font-bold text-slate-800">{att.descrizione}</span>
-                                      <span className="font-mono bg-slate-100 px-2.5 py-1 rounded-lg font-bold text-slate-700">Q.tà: {att.quantita}</span>
-                                   </div>
-                                ))}
-                             </div>
-                          ) : (
-                             <p className="text-xs text-slate-400 italic bg-slate-50 p-3 rounded-xl border border-slate-200">Nessuna attrezzatura dettagliata trovata per questo cantiere.</p>
+                              ))
                           )}
-                       </div>
-
-                       <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 flex justify-between items-center text-xs">
-                          <div>
-                             <strong className="text-emerald-800 block">Tempo stimato di intervento:</strong>
-                             <span className="text-emerald-900 font-extrabold text-sm">{clienteSelezionatoScheda.minutiLavoro} minuti</span>
-                          </div>
-                          <div className="text-right">
-                             <strong className="text-emerald-800 block">Orario Assegnato:</strong>
-                             <span className="text-emerald-900 font-mono font-extrabold text-sm">{clienteSelezionatoScheda.oraInizio} - {clienteSelezionatoScheda.oraFine}</span>
-                          </div>
-                       </div>
-                    </div>
-                  </>
-                )}
-
-                <div className="flex gap-4 pt-4 border-t border-slate-100">
-                  <button onClick={() => setClienteSelezionatoScheda(null)} className="flex-1 bg-slate-900 text-white px-6 py-3 rounded-xl text-xs font-bold shadow-md hover:bg-slate-800 transition-all">Chiudi Scheda</button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="hidden print:block w-full text-black bg-white font-sans text-sm">
-             {giorniVisibiliPerStampa.map((dataStr) => {
-                const interventiGiorno = interventiVisibiliArr.filter(i => i.dataAssegnata === dataStr && (i.selezionatoPerGiro || i.isPregresso));
-                if (interventiGiorno.length === 0) return null;
-
-                const distinta = interventiGiorno.find(i => i.isDistinta);
-                const lavori = interventiGiorno.filter(i => !i.isDistinta).sort((a,b) => a.oraInizio.localeCompare(b.oraInizio));
-                const nomeGiorno = getNomeGiorno(dataStr);
-
-                return (
-                   <div key={dataStr} className="break-after-page mb-10">
-                      <div className="border-b-2 border-black pb-3 mb-6 flex justify-between items-end">
-                         <div>
-                           <h1 className="text-2xl font-extrabold uppercase tracking-tight">FOGLIO DI VIAGGIO</h1>
-                           <p className="text-gray-600 font-bold mt-1 uppercase">{nomeGiorno} {formattaDataVisuale(dataStr)}</p>
-                         </div>
-                         <div className="text-right">
-                           <p className="text-xs uppercase text-gray-500 font-bold mb-1">Tecnico Assegnato</p>
-                           <p className="text-lg font-extrabold">{tecnicoSelezionato.nome}</p>
-                         </div>
                       </div>
+                  </div>
 
-                      {distinta && (
-                        <div className="mb-6 p-4 border border-black bg-gray-50 rounded-lg">
-                           <h2 className="font-extrabold text-base mb-2 uppercase flex items-center gap-2"><Package size={18} /> Distinta di Carico Magazzino</h2>
-                           <pre className="font-mono text-xs whitespace-pre-wrap">{distinta.descrizioneDistinta}</pre>
-                        </div>
+                  {/* PANNELLO DESTRO: MAPPA GIGANTE */}
+                  <div className="hidden md:block flex-1 bg-slate-100 relative z-0">
+                      {leafletLoaded ? (
+                          <MapContainer key={giornoSceltoFiltro} center={[SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG]} zoom={12} style={{ height: "100%", width: "100%" }}>
+                              <TileLayer url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png" />
+                              {listaAttiva.filter(i => i.lat && i.lng && !i.isDistinta).map((c, idx) => (
+                                  <Marker key={c.codice} position={[c.lat, c.lng]} icon={createNumberedIcon(idx + (listaAttiva[0]?.isDistinta ? 0 : 1))}>
+                                      <Popup>
+                                          <div className="p-1">
+                                              <p className="font-bold text-xs text-slate-900">{c.nome}</p>
+                                              <p className="text-[10px] text-slate-500">{c.oraInizio} - {c.minutiLavoro}m</p>
+                                          </div>
+                                      </Popup>
+                                  </Marker>
+                              ))}
+                          </MapContainer>
+                      ) : (
+                          <div className="w-full h-full flex items-center justify-center text-slate-400">
+                              <Loader2 size={32} className="animate-spin" />
+                          </div>
                       )}
+                  </div>
+              </div>
+          ) : (
+              // STATO VUOTO INIZIALE
+              <div className="flex-1 flex flex-col items-center justify-center bg-white">
+                  <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mb-4 border border-slate-100">
+                      <Map size={32} className="text-slate-300" />
+                  </div>
+                  <h2 className="text-lg font-bold text-slate-900 mb-2">Plancia Operativa Vuota</h2>
+                  <p className="text-sm text-slate-500 text-center max-w-md">
+                      Carica un file Excel con i cantieri e clicca su "Genera Rotte" per avviare il motore logistico.
+                  </p>
+              </div>
+          )}
+      </div>
 
-                      <div className="mt-4">
-                         <h2 className="font-extrabold text-base mb-3 uppercase border-b border-black pb-1">Elenco Interventi Giornalieri</h2>
-                         <table className="w-full text-left text-xs border-collapse border border-black">
-                            <thead>
-                               <tr className="bg-gray-100 border-b border-black">
-                                  <th className="p-2 border border-black w-24">Orario</th>
-                                  <th className="p-2 border border-black w-48">Riferimento BI & Cliente</th>
-                                  <th className="p-2 border border-black">Indirizzo & Località</th>
-                                  <th className="p-2 border border-black">Attrezzature / Note</th>
-                               </tr>
-                            </thead>
-                            <tbody>
-                               {lavori.map((lav, idx) => (
-                                  <tr key={idx} className="border-b border-black">
-                                     <td className="p-2 border border-black font-mono font-bold align-top">{lav.oraInizio} - {lav.oraFine}</td>
-                                     <td className="p-2 border border-black font-bold align-top">
-                                        {lav.nome}
-                                        <span className="block font-mono font-normal text-[10px] text-gray-600 mt-0.5">BI: {lav.numeroBi}</span>
-                                     </td>
-                                     <td className="p-2 border border-black align-top">{lav.indirizzo} {lav.localita ? `- ${lav.localita}` : ""}</td>
-                                     <td className="p-2 border border-black align-top text-[11px]">
-                                        {lav.dettaglioAttrezzature && lav.dettaglioAttrezzature.length > 0 
-                                           ? lav.dettaglioAttrezzature.map((d: any) => `${d.descrizione}: ${d.quantita}`).join(", ") 
-                                           : "Verifica standard"}
-                                     </td>
-                                  </tr>
-                               ))}
-                            </tbody>
-                         </table>
-                      </div>
+      {/* SCHEDA DETTAGLIO MODALE (Rimasta identica, ma z-index alto) */}
+      {clienteSelezionatoScheda && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8 relative border border-slate-200 my-auto max-h-[90vh] flex flex-col">
+            <button onClick={() => setClienteSelezionatoScheda(null)} className="absolute top-6 right-6 text-slate-400 bg-slate-50 border border-slate-200 p-2 rounded-full hover:bg-slate-100 hover:text-slate-900 transition-colors"><X size={18} /></button>
+            
+            {clienteSelezionatoScheda.isDistinta ? (
+              <>
+                <div className="flex items-center gap-4 mb-6">
+                  <div className="p-4 bg-slate-100 text-slate-900 rounded-xl border border-slate-200"><Package size={24} /></div>
+                  <div>
+                    <span className="bg-slate-100 text-slate-700 font-mono text-[10px] px-2 py-0.5 rounded border border-slate-200 font-bold mb-1 inline-block">MAGAZZINO</span>
+                    <h2 className="text-xl font-extrabold text-slate-900">Distinta di Carico</h2>
+                  </div>
+                </div>
+                <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 text-xs whitespace-pre-wrap font-mono leading-relaxed mb-6 overflow-y-auto flex-1">
+                  {clienteSelezionatoScheda.descrizioneDistinta}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-4 mb-6 pb-4 border-b border-slate-100">
+                  <div className="p-4 bg-slate-100 text-slate-900 rounded-xl border border-slate-200"><FileText size={24} /></div>
+                  <div>
+                    <div className="flex gap-2 mb-1">
+                       <span className="bg-slate-100 text-slate-700 font-mono text-[10px] px-2 py-0.5 rounded border border-slate-200 font-bold">BI: {clienteSelezionatoScheda.numeroBi}</span>
+                       {clienteSelezionatoScheda.haInsoluto && <span className="bg-red-50 text-red-700 border border-red-200 font-mono text-[10px] px-2 py-0.5 rounded font-bold">INSOLUTO</span>}
+                       {clienteSelezionatoScheda.resoEstintori && <span className="bg-orange-50 text-orange-700 border border-orange-200 font-mono text-[10px] px-2 py-0.5 rounded font-bold">RESO ESTINTORI</span>}
+                    </div>
+                    <h2 className="text-xl font-extrabold text-slate-900">{clienteSelezionatoScheda.nome}</h2>
+                    <p className="text-xs text-slate-500 font-medium mt-1">{clienteSelezionatoScheda.indirizzo}, {clienteSelezionatoScheda.localita}</p>
+                  </div>
+                </div>
+
+                <div className="space-y-6 overflow-y-auto pr-2 flex-1 mb-6 custom-scrollbar">
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs">
+                      <div><strong className="text-slate-500 block mb-0.5 uppercase text-[9px] tracking-wider">Referente</strong> <span className="font-bold text-slate-900">{clienteSelezionatoScheda.contatto || "-"}</span></div>
+                      <div><strong className="text-slate-500 block mb-0.5 uppercase text-[9px] tracking-wider">Telefono</strong> <span className="font-bold text-slate-900">{clienteSelezionatoScheda.telefono || "-"}</span></div>
+                      <div className="col-span-2"><strong className="text-slate-500 block mb-0.5 uppercase text-[9px] tracking-wider">Email</strong> <span className="font-bold text-slate-900">{clienteSelezionatoScheda.email || "-"}</span></div>
                    </div>
-                )
-             })}
+
+                   <div>
+                      <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 border-b border-slate-100 pb-1">Attrezzature ({clienteSelezionatoScheda.totaleArticoli || 0} pz)</h4>
+                      {clienteSelezionatoScheda.dettaglioAttrezzature && clienteSelezionatoScheda.dettaglioAttrezzature.length > 0 ? (
+                         <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
+                            {clienteSelezionatoScheda.dettaglioAttrezzature.map((att: any, idx: number) => (
+                               <div key={idx} className="p-3 flex justify-between items-center bg-white text-xs">
+                                  <span className="font-bold text-slate-800">{att.descrizione}</span>
+                                  <span className="font-mono bg-slate-50 border border-slate-200 px-2 py-0.5 rounded text-slate-700">Q.tà: {att.quantita}</span>
+                               </div>
+                            ))}
+                         </div>
+                      ) : (
+                         <p className="text-xs text-slate-400 italic bg-slate-50 p-3 rounded-xl border border-slate-200">Standard</p>
+                      )}
+                   </div>
+                </div>
+              </>
+            )}
+
+            <div className="pt-4 border-t border-slate-100 flex justify-end">
+              <button onClick={() => setClienteSelezionatoScheda(null)} className="bg-slate-900 text-white px-6 py-2.5 rounded-xl text-xs font-bold shadow-sm hover:bg-slate-800 transition-all">Chiudi</button>
+            </div>
           </div>
-
         </div>
-      </main>
+      )}
 
-      {/* PULSANTE FLUTTUANTE PER APRIRE LA CHAT IA */}
+      {/* CHAT IA (Mantenuta in basso a destra) */}
       <button
         onClick={() => setIsChatOpen(!isChatOpen)}
-        className={`fixed bottom-8 right-8 z-[100] w-16 h-16 rounded-full shadow-[0_10px_40px_rgba(37,99,235,0.4)] flex items-center justify-center transition-all duration-300 hover:scale-105 print:hidden ${
-          isChatOpen ? 'bg-slate-800 text-white hover:bg-slate-700 shadow-slate-500/30' : 'bg-gradient-to-br from-blue-600 to-blue-700 text-white'
+        className={`fixed bottom-6 right-6 z-[100] w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-all duration-300 print:hidden ${
+          isChatOpen ? 'bg-slate-900 text-white hover:bg-slate-800' : 'bg-white text-slate-900 border border-slate-200 hover:bg-slate-50'
         }`}
       >
-        {isChatOpen ? <X size={28} /> : (
-           <div className="relative flex items-center justify-center">
-              <MessageSquare size={26} className={chatLoading ? 'animate-pulse' : ''} />
-              {!isChatOpen && messages.length > 1 && (
-                 <span className="absolute -top-1 -right-2 bg-red-500 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white shadow-sm">
-                    {messages.length - 1}
-                 </span>
-              )}
-           </div>
-        )}
+        {isChatOpen ? <X size={24} /> : <MessageSquare size={24} className={chatLoading ? 'animate-pulse' : ''} />}
       </button>
 
-      {/* FINESTRA CHAT FLUTTUANTE */}
       <div 
-        className={`fixed bottom-28 right-8 z-[90] w-[380px] h-[600px] max-h-[75vh] bg-white rounded-3xl shadow-[0_20px_60px_-15px_rgba(0,0,0,0.2)] border border-slate-200 flex flex-col overflow-hidden transition-all duration-300 origin-bottom-right print:hidden ${
+        className={`fixed bottom-24 right-6 z-[90] w-[340px] h-[500px] max-h-[70vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden transition-all duration-300 origin-bottom-right print:hidden ${
           isChatOpen ? 'scale-100 opacity-100 translate-y-0' : 'scale-95 opacity-0 translate-y-8 pointer-events-none'
         }`}
       >
-        <div className="p-4 bg-gradient-to-r from-slate-900 to-slate-800 text-white flex justify-between items-center shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-500/20 rounded-xl backdrop-blur-sm border border-blue-400/30">
-               <Zap size={18} className="text-blue-300" />
-            </div>
-            <div>
-              <h3 className="font-extrabold text-sm tracking-wide">Assistente IA</h3>
-              <p className="text-[10px] text-slate-300 font-medium">Operativo e in ascolto</p>
-            </div>
+        <div className="p-4 bg-slate-900 text-white flex justify-between items-center shrink-0">
+          <div className="flex items-center gap-2">
+            <Zap size={16} className="text-slate-300" />
+            <h3 className="font-bold text-xs tracking-wide">Assistente IA</h3>
           </div>
-          <button onClick={() => setIsChatOpen(false)} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-full transition-colors">
-             <X size={18} />
-          </button>
+          <button onClick={() => setIsChatOpen(false)} className="text-slate-400 hover:text-white transition-colors"><X size={16} /></button>
         </div>
 
-        <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50/70 custom-scrollbar">
+        <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50 custom-scrollbar">
           {messages.map((msg, idx) => (
             <div key={idx} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] px-4 py-3 text-[13px] leading-relaxed shadow-sm ${
+              <div className={`max-w-[85%] px-3 py-2 text-xs leading-relaxed shadow-sm ${
                 msg.sender === 'user' 
-                  ? 'bg-blue-600 text-white rounded-2xl rounded-br-sm font-medium' 
-                  : 'bg-white text-slate-700 border border-slate-200/80 rounded-2xl rounded-bl-sm font-medium'
+                  ? 'bg-slate-900 text-white rounded-xl rounded-br-sm' 
+                  : 'bg-white text-slate-700 border border-slate-200 rounded-xl rounded-bl-sm'
               }`}>
                 {msg.text}
               </div>
@@ -2194,31 +1924,28 @@ Tecnico: ${tecnicoNome}`;
           ))}
           {chatLoading && (
             <div className="flex justify-start">
-              <div className="bg-white text-slate-500 border border-slate-200 px-4 py-3 rounded-2xl rounded-bl-sm text-[13px] shadow-sm flex items-center gap-2.5">
-                <Loader2 size={14} className="animate-spin text-blue-600" /> Sto elaborando le modifiche...
+              <div className="bg-white text-slate-500 border border-slate-200 px-3 py-2 rounded-xl rounded-bl-sm text-xs shadow-sm flex items-center gap-2">
+                <Loader2 size={12} className="animate-spin text-slate-900" /> Elaborazione...
               </div>
             </div>
           )}
           <div ref={messagesEndRef} />
         </div>
 
-        <form onSubmit={handleSendMessage} className="p-4 bg-white border-t border-slate-100 flex gap-2 items-center shrink-0">
+        <form onSubmit={handleSendMessage} className="p-3 bg-white border-t border-slate-100 flex gap-2 items-center shrink-0">
           <input 
             type="text"
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
-            placeholder="Es. Sposta Kalmar a mercoledì..."
-            className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-[13px] font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:bg-white transition-all shadow-inner"
+            placeholder="Es. Sposta Rossi a giovedì..."
+            className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400 transition-colors"
           />
-          <button 
-            type="submit"
-            disabled={chatLoading}
-            className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-2xl text-[13px] font-bold transition-all shadow-md disabled:opacity-50 shrink-0"
-          >
+          <button type="submit" disabled={chatLoading} className="bg-slate-900 hover:bg-slate-800 text-white px-3 py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 shrink-0">
             Invia
           </button>
         </form>
       </div>
+
     </div>
   );
 }
