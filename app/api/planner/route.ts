@@ -50,17 +50,19 @@ Un tecnico non deve MAI fare la spola tra valli diverse o tra litorale ed entrot
 NON inserire MAI nello stesso cluster cantieri che appartengono a macro-zone diverse:
 
 LA BUSSOLA LIGURE (Macro-Zone separate):
-- ZONA 1 (PONENTE LITORALE): Arenzano, Voltri, Prà, Pegli, Sestri Ponente, Cornigliano, Mele, Cogoleto, Acquasanta.
-- ZONA 2 (ENTROTERRA NORD / VAL POLCEVERA & SCRIVIA): Busalla, Ronco Scrivia, Isola del Cantone, Pontedecimo, Bolzaneto, Rivarolo, Certosa, Campomorone, Mignanego, Serra Riccò, Sant'Olcese.
-- ZONA 3 (CENTRO / PORTO / SAMPIERDARENA): Genova Centro, Sampierdarena, Foce, Carignano, Castelletto, San Fruttuoso, Marassi.
+- ZONA 1 (PONENTE LITORALE): Arenzano, Cogoleto, Voltri, Mele, Acquasanta, Prà, Pegli, Sestri Ponente, Cornigliano.
+- ZONA 2 (ENTROTERRA NORD / VAL POLCEVERA & SCRIVIA): Isola del Cantone, Ronco Scrivia, Busalla, Mignanego, Campomorone, Serra Riccò, Sant'Olcese, Pontedecimo, Bolzaneto, Rivarolo, Certosa.
+- ZONA 3 (CENTRO / PORTO / SAMPIERDARENA): Sampierdarena, Genova Centro, Foce, Carignano, Castelletto, San Fruttuoso, Marassi.
 - ZONA 4 (LEVANTE LITORALE): Albaro, Sturla, Quarto, Quinto, Nervi, Bogliasco, Pieve Ligure, Sori, Recco, Camogli, Rapallo.
 - ZONA 5 (VAL BISAGNO): Staglieno, Molassana, Struppa, Gavette, Bargagli, Torriglia.
 
+All'interno di ciascun cluster, ordina già i codici partendo da quello con "distanzaDaSedeKm" MAGGIORE (più lontano dalla Sede) fino a quello con "distanzaDaSedeKm" MINORE (più vicino alla Sede).
+
 Restituisci ESCLUSIVAMENTE un JSON valido con questa struttura esatta:
 {
-  "ragionamento_cartografo": "Spiega come hai diviso le zone applicando la Bussola Ligure",
+  "ragionamento_cartografo": "Spiega come hai diviso le zone e ordinato dal più lontano al più vicino",
   "cluster": [
-    { "zona": "Nome Macro-Zona", "codici": ["codice1", "codice2"] }
+    { "zona": "Nome Macro-Zona", "codici": ["codice_piu_lontano", "codice_intermedio", "codice_piu_vicino"] }
   ]
 }
 CANTIERI: ${JSON.stringify(data.interventi)}`;
@@ -74,23 +76,22 @@ CANTIERI: ${JSON.stringify(data.interventi)}`;
       // ==========================================
       const promptCronometrista = `Sei l'Agente Cronometrista di Asso Antincendio. Assegna i cluster geografici alle giornate lavorative disponibili.
 REGOLE TASSATIVE:
-1. Ogni giornata ha circa 480 minuti lavorativi (08:00 - 18:00 con pausa pranzo).
-2. Assegna un solo cluster geografico (o zone strettamente contigue) a ciascuna giornata. Non unire MAI Ponente (es. Arenzano) con Entroterra Nord (es. Busalla) o Levante nello stesso giorno.
+1. REGOLA DEL CONO DI RIENTRO (DAL PIÙ LONTANO AL PIÙ VICINO): In ogni singola giornata, il tecnico DEVE partire al mattino dal cantiere PIÙ LONTANO dalla Sede (distanzaDaSedeKm più alta, es. Arenzano) e avvicinarsi progressivamente alla Sede durante la giornata (es. Arenzano -> Mele -> Sestri Ponente).
+2. Assegna un solo cluster geografico (o zone strettamente contigue sulla stessa direttrice di rientro) a ciascuna giornata.
 3. Se una giornata ha impegni PREGRESSI al pomeriggio (es. oraInizio "14:00"), DEVI inserire cantieri normali della stessa zona PRIMA del pregresso per riempire la mattina.
 4. Se ci sono interventi con isSOS = true, cerca di inserirne 3 o 4 al giorno tenendo conto del CAP/Zona.
-5. Negli array di ciascun giorno inserisci i codici dei cantieri normali nell'ordine di visita ottimale.
 
 Restituisci ESCLUSIVAMENTE un JSON valido con questa struttura esatta:
 {
-  "ragionamento_incastri": "Spiega come hai assegnato i cluster alle date",
+  "ragionamento_incastri": "Spiega come hai applicato il Cono di Rientro in ogni giorno",
   "giorni": {
-    "YYYY-MM-DD": ["cod_1", "cod_2"]
+    "YYYY-MM-DD": ["cod_piu_lontano", "cod_intermedio", "cod_piu_vicino"]
   },
   "sospesi": ["cod_scartato"]
 }
 CLUSTER RICEVUTI: ${JSON.stringify(clusterGeografici)}
 GIORNATE E PREGRESSI: ${JSON.stringify(data.giornate)}
-CANTIERI (con durate e dettagli): ${JSON.stringify(data.interventi)}`;
+CANTIERI (con distanzaDaSedeKm e durate): ${JSON.stringify(data.interventi)}`;
 
       const resCronometrista = await generateWithRetry(model, [{ text: promptCronometrista }]);
       const bozzaPiano = JSON.parse(resCronometrista.response.text());
@@ -100,13 +101,13 @@ CANTIERI (con durate e dettagli): ${JSON.stringify(data.interventi)}`;
       // ==========================================
       const promptSupervisore = `Sei il Supervisore Logistico Finale di Asso Antincendio. Verifica e correggi la bozza del piano.
 CHECKLIST OBBLIGATORIA:
-1. Nessun giorno deve mischiare località incompatibili (es. Arenzano con Busalla, o Ponente con Levante). Se trovi un intruso fuori zona in un giorno, spostalo nel giorno della sua zona o in "sospesi".
-2. Controlla che ogni giornata con un PREGRESSO pomeridiano abbia cantieri assegnati per coprire la mattina.
-3. Controlla che TUTTI i codici dei cantieri ricevuti in input siano presenti (o dentro "giorni" o dentro "sospesi"). Non perdere nessun codice.
+1. VERIFICA CONO DI RIENTRO: Controlla ogni giornata. I cantieri sono ordinati dal più lontano dalla Sede (distanzaDaSedeKm maggiore) al più vicino (distanzaDaSedeKm minore)? Se vedi ad esempio prima Sestri Ponente/Mele e poi Arenzano, INVERTILI SUBITO in modo che parta da Arenzano, poi Mele e infine Sestri Ponente!
+2. Nessun giorno deve mischiare direttrici opposte (es. Arenzano con Busalla, o Ponente con Levante).
+3. Controlla che TUTTI i codici dei cantieri ricevuti in input siano presenti (o dentro "giorni" o dentro "sospesi").
 
 Restituisci ESCLUSIVAMENTE un JSON valido con questa struttura:
 {
-  "ragionamento_supervisore": "Spiega le verifiche e correzioni effettuate",
+  "ragionamento_supervisore": "Spiega le verifiche sul Cono di Rientro e le correzioni effettuate",
   "giorni": {
     "YYYY-MM-DD": ["cod_corretto1", "cod_corretto2"]
   },
@@ -134,11 +135,10 @@ DETTAGLI CANTIERI: ${JSON.stringify(data.interventi)}`;
       const systemPrompt = `Sei l'Assistente Operativo di Asso Antincendio. Il tuo UNICO compito è eseguire ALLA LETTERA l'ordine dato dall'utente nel COMANDO UTENTE, modificando la plancia attuale.
 
 REGOLE DI ESECUZIONE TASSATIVE:
-1. Esegui esattamente ciò che chiede l'utente (spostamenti di giorno, cambio d'ordine primo/ultimo, inserimento dai sospesi, messa in sospeso per cliente, numero BI o località).
+1. Esegui esattamente ciò che chiede l'utente (spostamenti di giorno, cambio d'ordine, riordino secondo il Cono di Rientro dal più lontano al più vicino, inserimento dai sospesi, messa in sospeso).
 2. Usa la mappa "giornateDisponibili" per sapere esattamente a quale data "YYYY-MM-DD" corrisponde il giorno nominato dall'utente (es. Lunedì, Martedì, Mercoledì, Giovedì, Venerdì, Sabato).
-3. L'ordine dei codici nell'array di un giorno ("YYYY-MM-DD": ["cod1", "cod2", ...]) determina l'ordine cronologico dal mattino alla sera. Se l'utente chiede di mettere un cantiere "per primo" o "al mattino", mettilo all'inizio dell'array di quel giorno.
-4. CONSERVAZIONE TOTALE DEI DATI: Tutti i cantieri che NON sono coinvolti dal comando dell'utente DEVONO rimanere esattamente nel giorno e nell'ordine in cui si trovano adesso. Non dimenticare e non cancellare nessun codice!
-5. Tutti i giorni presenti in "giornateDisponibili" devono essere presenti come chiavi nell'oggetto "giorni".
+3. L'ordine dei codici nell'array di un giorno ("YYYY-MM-DD": ["cod1", "cod2", ...]) determina l'ordine cronologico dal mattino alla sera.
+4. CONSERVAZIONE TOTALE DEI DATI: Tutti i cantieri che NON sono coinvolti dal comando dell'utente DEVONO rimanere esattamente nel giorno e nell'ordine in cui si trovano adesso. Non perdere nessun codice!
 
 Restituisci ESCLUSIVAMENTE un JSON valido con questa struttura esatta:
 {

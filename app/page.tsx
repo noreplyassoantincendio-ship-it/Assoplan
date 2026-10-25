@@ -7,9 +7,9 @@ import Papa from "papaparse";
 import dynamic from "next/dynamic";
 import {
   UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet,
-  Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Mail, Timer,
-  FileText, X, Sliders, Check, PauseCircle, ExternalLink, AlertTriangle,
-  CheckCircle, PlayCircle, Lock, CalendarPlus, Phone, Book, User,
+  Zap, UserCheck, Printer, Calendar, CheckSquare, Mail,
+  FileText, X, Sliders, Check, PauseCircle, ExternalLink,
+  CheckCircle, Lock, CalendarPlus, Phone, Book, User,
   Banknote, Car, Home as HomeIcon, AlertOctagon, MessageSquare,
   ArrowRightLeft, List, FileUp, Wrench
 } from "lucide-react";
@@ -176,6 +176,46 @@ const calcolaDistanzaKm = (lat1: number, lon1: number, lat2: number, lon2: numbe
     const dLon = (lon2 - lon1) * (Math.PI / 180);
     const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
     return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+};
+
+// ORDINAMENTO "CONO DI RIENTRO": Dal cantiere più lontano dalla Sede al più vicino
+const ordinaConoDiRientro = (cantieri: any[]) => {
+    if (!cantieri || cantieri.length <= 1) return cantieri;
+    let daOrdinare = [...cantieri];
+
+    const distDaSede = (c: any) => {
+        if (!c.lat || !c.lng) return 0;
+        return calcolaDistanzaKm(SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG, c.lat, c.lng);
+    };
+
+    // 1. Punto di partenza mattutino: il cantiere PIÙ LONTANO dalla Sede
+    daOrdinare.sort((a, b) => distDaSede(b) - distDaSede(a));
+    const ordinati: any[] = [];
+    let curr = daOrdinare.shift()!;
+    ordinati.push(curr);
+
+    // 2. Risalita progressiva verso la Sede (raggruppando i cantieri vicinissimi nello stesso comune)
+    while (daOrdinare.length > 0) {
+        const viciniStessoComune = daOrdinare
+            .filter(c => c.lat && c.lng && curr.lat && curr.lng && calcolaDistanzaKm(curr.lat, curr.lng, c.lat, c.lng) <= 3.0)
+            .sort((a, b) => calcolaDistanzaKm(curr.lat, curr.lng, a.lat, a.lng) - calcolaDistanzaKm(curr.lat, curr.lng, b.lat, b.lng));
+
+        let prossimo: any;
+        if (viciniStessoComune.length > 0) {
+            prossimo = viciniStessoComune[0];
+        } else {
+            // Altrimenti procedi dal più lontano al più vicino alla Sede
+            daOrdinare.sort((a, b) => distDaSede(b) - distDaSede(a));
+            prossimo = daOrdinare[0];
+        }
+
+        const idx = daOrdinare.findIndex(x => x.codice === prossimo.codice);
+        if (idx !== -1) daOrdinare.splice(idx, 1);
+        ordinati.push(prossimo);
+        curr = prossimo;
+    }
+
+    return ordinati;
 };
 
 let googleMapsPromise: Promise<void> | null = null;
@@ -392,7 +432,8 @@ export default function Home() {
   }, [clienteSelezionatoScheda, sospesoInModifica]);
 
   const trovaCoordinateGoogle = async (indirizzo: string, localita: string) => {
-    let cleanAddr = String(indirizzo).replace(/Nessun indirizzo valido letto/gi, '').trim();
+    let cleanAddr = String(indirizzo).replace(/Nessun indirizzo valido letto/gi, '').replace(/Vedi Google Calendar/gi, '').trim();
+    if (!cleanAddr && !localita) return null;
     
     if (cleanAddr.toLowerCase().includes("acquasanta") || (localita && String(localita).toLowerCase().includes("acquasanta"))) {
       return { lat: 44.4568, lng: 8.7678, precisione: "strada", origine: "override_manuale" };
@@ -405,7 +446,7 @@ export default function Home() {
        citta = parts[1].trim();
     }
 
-    const comuniProvincia = ["ronco scrivia", "busalla", "mignanego", "crocefieschi", "arenzano", "mele", "voltri", "sanremo", "imperia", "vado ligure", "savona", "pontedecimo", "bolzaneto", "campomorone", "ceranesi", "sant'olcese", "serra riccò"];
+    const comuniProvincia = ["ronco scrivia", "busalla", "mignanego", "crocefieschi", "arenzano", "mele", "voltri", "sanremo", "imperia", "vado ligure", "savona", "pontedecimo", "bolzaneto", "campomorone", "ceranesi", "sant'olcese", "serra riccò", "recco", "rapallo", "chiavari", "cogoleto", "sestri ponente", "sampierdarena", "nervi", "pegli"];
     const addrLower = cleanAddr.toLowerCase();
     
     if (!citta || citta.toLowerCase() === "genova") {
@@ -422,8 +463,10 @@ export default function Home() {
     let query = "";
     if (cleanAddr.toLowerCase().includes("italia") || cleanAddr.toLowerCase().includes("italy")) {
         query = cleanAddr; 
-    } else {
+    } else if (cleanAddr) {
         query = `${cleanAddr}, ${citta}, Italy`;
+    } else {
+        query = `${citta}, Italy`;
     }
 
     const cacheChiave = query.toLowerCase();
@@ -447,6 +490,7 @@ export default function Home() {
     return null;
   };
 
+  // ESTRAZIONE COMPLETA COORDINATE ANCHE PER I PREGRESSI SENZA "LOCATION"
   const fetchEventiRealiCalendar = async (emailTecnico: string, token: string) => {
     try {
       const [yI, mI, dI] = dataInizio.split("-").map(Number);
@@ -471,19 +515,44 @@ export default function Home() {
         const biGiaLetti = matches ? matches.map(m => m.replace(/BI[:\s]*/g, "").trim()) : [];
         
         let localitaEsattaDaNote = "";
+        let indirizzoDaNote = "";
         if (evt.description) {
             const matchLoc = evt.description.match(/Localit[aà]:\s*([^\n]+)/i);
             if (matchLoc && matchLoc[1]) localitaEsattaDaNote = matchLoc[1].split("-")[0].trim();
+            const matchInd = evt.description.match(/Indirizzo:\s*([^\n]+)/i);
+            if (matchInd && matchInd[1]) indirizzoDaNote = matchInd[1].trim();
         }
 
-        let latEvt: number | null = null; let lngEvt: number | null = null;
-        if (evt.location && evt.location.trim().length > 2) {
-          let addressToSearch = evt.location;
-          if (localitaEsattaDaNote) addressToSearch += `, ${localitaEsattaDaNote}`;
-          
-          const coord = await trovaCoordinateGoogle(addressToSearch, localitaEsattaDaNote); 
+        const indirizzoEffettivo = (evt.location && evt.location.trim().length > 2)
+            ? evt.location.trim()
+            : indirizzoDaNote;
+
+        let latEvt: number | null = null;
+        let lngEvt: number | null = null;
+
+        if (indirizzoEffettivo || localitaEsattaDaNote) {
+          const coord = await trovaCoordinateGoogle(indirizzoEffettivo, localitaEsattaDaNote); 
           if (coord) { latEvt = coord.lat; lngEvt = coord.lng; }
         }
+
+        // Se ancora non ha coordinate, proviamo a geocodificare il titolo pulito dell'evento
+        if (!latEvt && evt.summary) {
+          const titoloPulito = String(evt.summary).replace(/\[.*?\]/g, "").split("- BI")[0].trim();
+          if (titoloPulito.length > 3) {
+            const coordTitolo = await trovaCoordinateGoogle(titoloPulito, "Genova");
+            if (coordTitolo) { latEvt = coordTitolo.lat; lngEvt = coordTitolo.lng; }
+          }
+        }
+
+        // Fallback sulla Sede così il pregresso compare sempre sulla mappa
+        if (!latEvt || !lngEvt) {
+          latEvt = SEDE_UFFICIO_LAT;
+          lngEvt = SEDE_UFFICIO_LNG;
+        }
+
+        const locationVisuale = indirizzoEffettivo
+            ? `${indirizzoEffettivo}${localitaEsattaDaNote ? `, ${localitaEsattaDaNote}` : ""}`
+            : (localitaEsattaDaNote || "Sede / Vedi note");
 
         if (evt.start?.date && evt.end?.date) {
             const y = parseInt(evt.start.date.split("-")[0]);
@@ -496,7 +565,7 @@ export default function Home() {
                 id: evt.id, dataStr: evt.start.date, 
                 lat: latEvt, lng: lngEvt, 
                 durataMinuti: 480, fineMinuti: 17 * 60, numeriBiRilevati: biGiaLetti,
-                summary: evt.summary || "", description: evt.description || "", location: evt.location || "",
+                summary: evt.summary || "", description: evt.description || "", location: locationVisuale,
                 startD, endD
             });
         } else if (evt.start?.dateTime && evt.end?.dateTime) {
@@ -509,7 +578,7 @@ export default function Home() {
                 id: evt.id, dataStr: `${y}-${m}-${d}`, 
                 lat: latEvt, lng: lngEvt, 
                 durataMinuti: Math.round((endD.getTime() - startD.getTime()) / 60000), fineMinuti: fineMinutiLocali, numeriBiRilevati: biGiaLetti,
-                summary: evt.summary || "", description: evt.description || "", location: evt.location || "",
+                summary: evt.summary || "", description: evt.description || "", location: locationVisuale,
                 startD, endD
             });
         }
@@ -537,7 +606,12 @@ export default function Home() {
         if (tappe.length > 0) {
             const origin = encodeURIComponent(`${SEDE_UFFICIO_LAT},${SEDE_UFFICIO_LNG}`);
             const destination = encodeURIComponent(`${SEDE_UFFICIO_LAT},${SEDE_UFFICIO_LNG}`);
-            const waypoints = tappe.map(t => encodeURIComponent(`${t.indirizzo}, ${t.localita || 'Genova'}, Italy`)).join("|");
+            const waypoints = tappe.map(t => {
+                if (t.indirizzo && !t.indirizzo.includes("Vedi Google Calendar") && !t.indirizzo.includes("Sede / Vedi note")) {
+                    return encodeURIComponent(`${t.indirizzo}, ${t.localita || 'Genova'}, Italy`);
+                }
+                return encodeURIComponent(`${t.lat},${t.lng}`);
+            }).join("|");
             navUrl = `\n📍 MASTER LINK NAVIGAZIONE GIORNATA (Tutte le tappe):\nhttps://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&waypoints=${waypoints}\n`;
         }
         return `${cliente.descrizioneDistinta}\n${navUrl}`;
@@ -568,7 +642,7 @@ https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${clien
 Tecnico: ${tecnicoNome}`;
   };
 
-  // MOTORE ORARIO CON INCASTRO MATTINA/POMERIGGIO ATTORNO AI PREGRESSI
+  // MOTORE ORARIO CON "CONO DI RIENTRO" (Dal più lontano al più vicino alla Sede)
   const ricalcolaDistinteEOrari = async (
       listaDaOrdinare: any[],
       statsLocali: any[] = giornateStats,
@@ -593,24 +667,15 @@ Tecnico: ${tecnicoNome}`;
         let orarioCorrenteMinuti = 8 * 60; // Partenza alle 08:00
         let ultimaCoordGiorno: { lat: number; lng: number } | null = null;
 
-        // Separiamo i pregressi (ordinati per oraInizio) dai cantieri normali
         const pregressiFila = interventiGiorno
             .filter((c: any) => c.isPregresso)
             .sort((a: any, b: any) => OrarioInMinuti(a.oraInizio, 480) - OrarioInMinuti(b.oraInizio, 480));
 
         let normaliFila = interventiGiorno.filter((c: any) => !c.isPregresso && c.selezionatoPerGiro);
 
+        // Applica il Cono di Rientro: dal cantiere più lontano dalla Sede al più vicino
         if (usaOrdinamentoGeografico && normaliFila.length > 1) {
-            let daOrdinare = [...normaliFila];
-            let ordinatiGeo = [];
-            let currPos = { lat: SEDE_UFFICIO_LAT, lng: SEDE_UFFICIO_LNG };
-            while (daOrdinare.length > 0) {
-                daOrdinare.sort((a, b) => calcolaDistanzaKm(currPos.lat, currPos.lng, a.lat, a.lng) - calcolaDistanzaKm(currPos.lat, currPos.lng, b.lat, b.lng));
-                const next = daOrdinare.shift();
-                ordinatiGeo.push(next);
-                if (next.lat && next.lng) currPos = { lat: next.lat, lng: next.lng };
-            }
-            normaliFila = ordinatiGeo;
+            normaliFila = ordinaConoDiRientro(normaliFila);
         }
 
         let furgone = 0; let piccoNegativo = 0; let totaleMovimenti = 0;
@@ -634,7 +699,6 @@ Tecnico: ${tecnicoNome}`;
                 const { minuti: minViaggioTest } = await calcolaTempoDistanzaGoogle(puntoPartenza.lat, puntoPartenza.lng, proxNorm.lat, proxNorm.lng);
                 const { fineLavoro: fineNormTest } = calcolaTempistiche(orarioCorrenteMinuti, minViaggioTest, proxNorm.minutiLavoro);
 
-                // Se il cantiere normale finisce prima dell'inizio del pregresso (con 10 min di margine), lo incastriamo PRIMA del pregresso!
                 if (fineNormTest + 10 <= startPregMin) {
                     prendiPregresso = false;
                 } else {
@@ -929,11 +993,14 @@ Tecnico: ${tecnicoNome}`;
         for (const cliente of Array.from(clientiMappa.values())) {
           let coordinate = null;
           let origineCoord = "default";
-          if (cliente.indirizzo?.trim().length > 2) {
+          if (cliente.indirizzo?.trim().length > 2 || cliente.localita?.trim().length > 2) {
             coordinate = await trovaCoordinateGoogle(cliente.indirizzo, cliente.localita);
             if (coordinate) origineCoord = coordinate.origine || "google";
           }
-          datiConCoordinate.push({ ...cliente, lat: coordinate?.lat || 44.4056, lng: coordinate?.lng || 8.9463, origineCoord });
+          const lat = coordinate?.lat || SEDE_UFFICIO_LAT;
+          const lng = coordinate?.lng || SEDE_UFFICIO_LNG;
+          const distanzaDaSedeKm = Number(calcolaDistanzaKm(SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG, lat, lng).toFixed(1));
+          datiConCoordinate.push({ ...cliente, lat, lng, distanzaDaSedeKm, origineCoord });
         }
 
         const dateRange = getGiornateLavorative(dataInizio, dataFine, giorniAttivi);
@@ -963,7 +1030,7 @@ Tecnico: ${tecnicoNome}`;
                 codice: `PREGRESSO_${evt.id}`,
                 isPregresso: true, isDistinta: false,
                 nome: nomeCliente, numeroBi: numeroBi,
-                indirizzo: evt.location || "Vedi Google Calendar", localita: "",
+                indirizzo: evt.location || "Sede / Vedi note", localita: "",
                 oraInizio: `${hhStart}:${mmStart}`, oraFine: `${hhEnd}:${mmEnd}`,
                 dataAssegnata: evt.dataStr, giorno: getNomeGiorno(evt.dataStr),
                 selezionatoPerGiro: true, syncedToGoogle: true,
@@ -1006,7 +1073,7 @@ Tecnico: ${tecnicoNome}`;
         let simInterval = setInterval(() => {
             setProgressIA(prev => {
                 if (prev.percent < 90) {
-                    return { ...prev, percent: prev.percent + 1, text: "Ragionamento IA in corso (Cartografo -> Cronometrista -> Supervisore)..." };
+                    return { ...prev, percent: prev.percent + 1, text: "Ragionamento IA in corso (Cono di Rientro & Orari)..." };
                 }
                 return prev;
             });
@@ -1021,6 +1088,7 @@ Tecnico: ${tecnicoNome}`;
                     indirizzo: c.indirizzo,
                     localita: c.localita,
                     cap: c.cap,
+                    distanzaDaSedeKm: c.distanzaDaSedeKm,
                     minutiLavoro: c.minutiLavoro,
                     isSOS: c.resoEstintori
                 })),
@@ -1053,7 +1121,7 @@ Tecnico: ${tecnicoNome}`;
             });
             
             clearInterval(simInterval);
-            setProgressIA({ active: true, percent: 92, text: "Applicazione rotte e calcolo tempistiche..." });
+            setProgressIA({ active: true, percent: 92, text: "Applicazione Cono di Rientro e tempistiche..." });
 
             const iaResult = await res.json();
             
@@ -1093,10 +1161,10 @@ Tecnico: ${tecnicoNome}`;
 
         setProgressIA({ active: true, percent: 98, text: "Finalizzazione plancia logistica..." });
 
-        // Rispettiamo l'ordine restituito dall'IA
         clientiPianificati.sort((a, b) => (a._aiOrder ?? 999) - (b._aiOrder ?? 999));
         const datiCombinati = [...eventiPregressiUI, ...clientiPianificati];
 
+        // usaOrdinamentoGeografico = true applica ordinaConoDiRientro (dal più lontano al più vicino)
         const resRic = await ricalcolaDistinteEOrari(datiCombinati, giornateStrutturate, true, true);
         setInterventiGrezzi(resRic.listaOrdinata);
         setGiornateStats(resRic.statsAggiornate);
@@ -1184,7 +1252,6 @@ Tecnico: ${tecnicoNome}`;
                   result.push(item);
               }
               
-              // scartaOvertimeAutomatico = false per non annullare mai lo spostamento manuale dell'utente
               const resRic = await ricalcolaDistinteEOrari(result, giornateStats, false, false);
               setGiornateStats(resRic.statsAggiornate);
               setInterventiGrezzi(resRic.listaOrdinata);
@@ -1229,7 +1296,6 @@ Tecnico: ${tecnicoNome}`;
     e.target.value = '';
   };
 
-  // CHAT IA ARRICCHITA CON CONTESTO COMPLETO (GIORNI, LOCALITÀ, BI, ORARI)
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim() || chatLoading) return;
@@ -1267,6 +1333,7 @@ Tecnico: ${tecnicoNome}`;
               indirizzo: i.indirizzo,
               localita: i.localita,
               cap: i.cap,
+              distanzaDaSedeKm: i.distanzaDaSedeKm,
               dataAssegnata: i.dataAssegnata,
               nomeGiorno: getNomeGiorno(i.dataAssegnata),
               oraInizio: i.oraInizio,
@@ -1283,6 +1350,7 @@ Tecnico: ${tecnicoNome}`;
               indirizzo: s.indirizzo,
               localita: s.localita,
               cap: s.cap,
+              distanzaDaSedeKm: s.distanzaDaSedeKm,
               minutiLavoro: s.minutiLavoro,
               isSOS: !!s.resoEstintori,
               isInsoluto: !!s.haInsoluto
@@ -1310,7 +1378,6 @@ Tecnico: ${tecnicoNome}`;
             let nuoviSospesi: any[] = [];
 
             tuttaLaLista.forEach(item => {
-              // I pregressi restano sempre ancorati al loro giorno originale
               if (item.isPregresso) {
                 nuoviAssegnati.push(item);
                 return;
@@ -1354,7 +1421,6 @@ Tecnico: ${tecnicoNome}`;
                return (a._aiIndex || 0) - (b._aiIndex || 0);
             });
 
-            // Non scartiamo l'overtime in automatico così l'ordine dato in chat viene SEMPRE eseguito
             const resRic = await ricalcolaDistinteEOrari(nuoviAssegnati, giornateStats, false, false);
             setInterventiGrezzi(resRic.listaOrdinata);
             setGiornateStats(resRic.statsAggiornate);
@@ -1553,14 +1619,18 @@ Tecnico: ${tecnicoNome}`;
     setTimeout(() => setBulkSyncStatus({ active: false, progress: 0, current: 0, total: 0 }), 2000); 
   };
 
-  const createNumberedIcon = (numero: number) => {
+  // BADGE COLORATI SULLA MAPPA: Viola per Pregressi, Arancione per SOS, Blu Scuro per Ordinari
+  const createNumberedIcon = (numero: number, isPregresso = false, isSOS = false) => {
     if (leafletRef.current) {
+      const bgColor = isPregresso ? "#4f46e5" : isSOS ? "#ea580c" : "#0f172a";
+      const label = isPregresso ? `P${numero}` : `${numero}`;
+      const size = isPregresso ? 30 : 26;
       return leafletRef.current.divIcon({
         className: "custom-marker-icon",
-        html: `<div style="background-color: #0f172a; color: white; border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.4); font-size: 11px;">${numero}</div>`,
-        iconSize: [26, 26],
-        iconAnchor: [13, 26],
-        popupAnchor: [0, -26]
+        html: `<div style="background-color: ${bgColor}; color: white; border-radius: 50%; width: ${size}px; height: ${size}px; display: flex; align-items: center; justify-content: center; font-weight: 800; border: 2.5px solid white; box-shadow: 0 3px 6px rgba(0,0,0,0.45); font-size: 11px;">${label}</div>`,
+        iconSize: [size, size],
+        iconAnchor: [size / 2, size],
+        popupAnchor: [0, -size]
       });
     }
     return undefined;
@@ -1642,6 +1712,8 @@ Tecnico: ${tecnicoNome}`;
       statGiornoAttivo = giornateStats.find(g => g.dataStr === giornoSceltoFiltro);
   }
 
+  const tappeMappaGiorno = listaAttiva.filter(i => !i.isDistinta && i.lat && i.lng);
+
   return (
     <div className="flex flex-col h-screen w-full bg-slate-100 text-slate-900 font-sans overflow-hidden relative print:h-auto print:overflow-visible print:bg-white" onClick={() => setMenuAperto(null)}>
       
@@ -1666,7 +1738,7 @@ Tecnico: ${tecnicoNome}`;
               <h1 className="text-lg font-extrabold tracking-tight text-slate-900 flex items-center gap-2">
                 Asso Antincendio <span className="text-blue-600 font-normal text-sm">| Smart Logistics</span>
               </h1>
-              <p className="text-[11px] text-slate-500">Rubrica Clienti, Dati Rapportino & Motore Multi-Agente IA</p>
+              <p className="text-[11px] text-slate-500">Cono di Rientro, Rubrica Clienti, Dati Rapportino & Multi-Agente IA</p>
             </div>
          </div>
 
@@ -1824,7 +1896,7 @@ Tecnico: ${tecnicoNome}`;
           {interventiGrezzi.length > 0 ? (
               <div className="flex-1 flex overflow-hidden">
                   
-                  {/* PANNELLO SINISTRO: SCHEDE COMPLETE CON REFERENTI, TELEFONI E RAPPORTINO */}
+                  {/* PANNELLO SINISTRO: SCHEDE COMPLETE */}
                   <div className="w-full md:w-[54%] lg:w-[50%] h-full bg-white border-r border-slate-200 flex flex-col z-10">
                       
                       <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
@@ -1833,7 +1905,7 @@ Tecnico: ${tecnicoNome}`;
                                   {giornoSceltoFiltro === "sospesi" ? `⏸ Cantieri in Sospeso (${clientiInSospeso.length})` : `📅 ${statGiornoAttivo?.nomeGiorno} ${formattaDataVisuale(giornoSceltoFiltro)}`}
                               </h2>
                               <p className="text-[11px] text-slate-500 font-medium">
-                                  Trascina le schede per riordinare la giornata oppure usa ⇄ per cambiare giorno.
+                                  Cono di Rientro attivo (dal più lontano al più vicino). Trascina per riordinare o usa ⇄.
                               </p>
                           </div>
                           {statGiornoAttivo && (
@@ -1856,22 +1928,33 @@ Tecnico: ${tecnicoNome}`;
                               listaAttiva.map((item, idx) => {
                                   const numTappa = idx + (listaAttiva[0]?.isDistinta ? 0 : 1);
 
-                                  // CARD SPECIALIZZATA PER DISTINTA DI CARICO MAGAZZINO
+                                  // DISTINTA DI CARICO CHIUSA (COMPATTA SU UNA RIGA)
                                   if (item.isDistinta) {
                                       return (
-                                          <div key={item.codice} className="p-3.5 rounded-xl border border-orange-200 bg-orange-50/70 shadow-xs">
-                                              <div className="flex items-center justify-between gap-2 mb-2">
-                                                  <div className="flex items-center gap-2">
-                                                      <span className="px-2 py-0.5 rounded bg-orange-200 text-orange-900 font-extrabold text-[10px]">07:00 - 08:00 • MAGAZZINO</span>
-                                                      <span className="font-extrabold text-xs text-slate-900">{item.nome}</span>
-                                                  </div>
-                                                  <button onClick={() => setClienteSelezionatoScheda(item)} className="text-orange-800 hover:bg-orange-100 px-2.5 py-1 rounded-lg text-[11px] font-bold border border-orange-200 bg-white cursor-pointer">
-                                                      Dettaglio & Link Maps
-                                                  </button>
+                                          <div
+                                              key={item.codice}
+                                              onClick={() => setClienteSelezionatoScheda(item)}
+                                              className="px-3.5 py-2.5 rounded-xl border border-orange-200 bg-orange-50/80 hover:bg-orange-100/70 transition-colors flex flex-wrap items-center justify-between gap-2 cursor-pointer shadow-2xs"
+                                          >
+                                              <div className="flex flex-wrap items-center gap-2">
+                                                  <span className="px-2 py-0.5 rounded bg-orange-200 text-orange-900 font-extrabold text-[10px]">
+                                                      07:00 - 08:00 • MAGAZZINO
+                                                  </span>
+                                                  <span className="font-extrabold text-xs text-slate-900">
+                                                      {item.nome}
+                                                  </span>
+                                                  {item.totaleDaCaricare !== undefined && (
+                                                      <span className="text-[10px] font-mono font-extrabold bg-white text-orange-900 border border-orange-300 px-2 py-0.5 rounded">
+                                                          Muletti da caricare: {item.totaleDaCaricare} pz
+                                                      </span>
+                                                  )}
                                               </div>
-                                              <div className="text-[11px] font-mono text-slate-700 bg-white/90 p-2.5 rounded-lg border border-orange-200/80 whitespace-pre-wrap">
-                                                  {item.descrizioneDistinta}
-                                              </div>
+                                              <button
+                                                  onClick={(e) => { e.stopPropagation(); setClienteSelezionatoScheda(item); }}
+                                                  className="text-orange-900 hover:bg-orange-200/60 px-2.5 py-1 rounded-lg text-[10px] font-extrabold border border-orange-300 bg-white cursor-pointer"
+                                              >
+                                                  Apri Distinta & Link Maps
+                                              </button>
                                           </div>
                                       );
                                   }
@@ -1887,21 +1970,21 @@ Tecnico: ${tecnicoNome}`;
                                           onDrop={(e) => handleDropToDay(e, giornoSceltoFiltro === "sospesi" ? null : giornoSceltoFiltro, item.codice)}
                                           className={`group relative flex flex-col p-3.5 rounded-xl border transition-all
                                               ${dragOverCard === item.codice ? 'border-t-4 border-t-blue-600 mt-1' : ''}
-                                              ${item.isPregresso ? 'bg-indigo-50/70 border-indigo-200' : 'bg-white border-slate-200 hover:border-blue-400 cursor-grab active:cursor-grabbing shadow-xs hover:shadow-md'}
+                                              ${item.isPregresso ? 'bg-indigo-50/80 border-indigo-300' : 'bg-white border-slate-200 hover:border-blue-400 cursor-grab active:cursor-grabbing shadow-xs hover:shadow-md'}
                                           `}
                                       >
                                           {/* RIGA 1: TESTATA ORARIO, VIAGGIO, BI, TAG E AZIONI */}
                                           <div className="flex flex-wrap items-center justify-between gap-2 pb-2 mb-2 border-b border-slate-100">
                                               <div className="flex flex-wrap items-center gap-1.5">
                                                   {giornoSceltoFiltro !== "sospesi" && (
-                                                      <span className="w-6 h-6 rounded-full bg-slate-900 text-white flex items-center justify-center text-[11px] font-extrabold shrink-0">
-                                                          {numTappa}
+                                                      <span className={`px-2 h-6 rounded-full text-white flex items-center justify-center text-[11px] font-extrabold shrink-0 ${item.isPregresso ? 'bg-indigo-600' : item.resoEstintori ? 'bg-orange-600' : 'bg-slate-900'}`}>
+                                                          {item.isPregresso ? `P${numTappa}` : numTappa}
                                                       </span>
                                                   )}
 
                                                   {item.isPregresso ? (
-                                                      <span className="text-[11px] font-mono font-extrabold text-indigo-900 bg-indigo-100 px-2 py-0.5 rounded border border-indigo-200 flex items-center gap-1">
-                                                          <Lock size={10}/> TASSATIVO {item.oraInizio} - {item.oraFine}
+                                                      <span className="text-[11px] font-mono font-extrabold text-indigo-900 bg-indigo-100 px-2 py-0.5 rounded border border-indigo-300 flex items-center gap-1">
+                                                          <Lock size={10}/> PREGRESSO {item.oraInizio} - {item.oraFine}
                                                       </span>
                                                   ) : giornoSceltoFiltro !== "sospesi" ? (
                                                       <span className="text-[11px] font-mono font-extrabold text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
@@ -1980,9 +2063,16 @@ Tecnico: ${tecnicoNome}`;
                                               <div className="text-sm font-extrabold text-slate-900 leading-snug">
                                                   {item.nome}
                                               </div>
-                                              <div className="text-xs font-semibold text-slate-600 flex items-center gap-1 mt-0.5">
-                                                  <MapPin size={12} className="text-blue-600 shrink-0"/>
-                                                  <span>{item.indirizzo || "Indirizzo non specificato"}{item.cap ? ` - ${item.cap}` : ""}{item.localita ? ` ${item.localita}` : ""}</span>
+                                              <div className="text-xs font-semibold text-slate-600 flex items-center justify-between gap-2 mt-0.5">
+                                                  <span className="flex items-center gap-1">
+                                                      <MapPin size={12} className="text-blue-600 shrink-0"/>
+                                                      <span>{item.indirizzo || "Indirizzo non specificato"}{item.cap ? ` - ${item.cap}` : ""}{item.localita ? ` ${item.localita}` : ""}</span>
+                                                  </span>
+                                                  {item.distanzaDaSedeKm !== undefined && (
+                                                      <span className="text-[10px] font-mono text-slate-400 shrink-0">
+                                                          ({item.distanzaDaSedeKm} km da Sede)
+                                                      </span>
+                                                  )}
                                               </div>
                                           </div>
 
@@ -2010,9 +2100,9 @@ Tecnico: ${tecnicoNome}`;
                                               </div>
                                           </div>
 
-                                          {/* RIGA 4: DATI DEL RAPPORTINO / ATTREZZATURE E MULETTI (SEMPRE VISIBILI) */}
+                                          {/* RIGA 4: DATI DEL RAPPORTINO / ATTREZZATURE E MULETTI */}
                                           {item.isPregresso ? (
-                                              <div className="bg-indigo-100/50 border border-indigo-200/80 rounded-lg px-3 py-2 text-[11px] text-indigo-950 whitespace-pre-wrap font-medium">
+                                              <div className="bg-indigo-100/60 border border-indigo-200 rounded-lg px-3 py-2 text-[11px] text-indigo-950 whitespace-pre-wrap font-medium">
                                                   {item.descrizionePregressa}
                                               </div>
                                           ) : (
@@ -2041,7 +2131,6 @@ Tecnico: ${tecnicoNome}`;
                                               </div>
                                           )}
 
-                                          {/* MOTIVO SOSPESO O RIENTRO IN SEDE */}
                                           {giornoSceltoFiltro === "sospesi" && item.motivoSospeso && (
                                               <div className="mt-2 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg">
                                                   ⚠️ Stato: {item.motivoSospeso}
@@ -2060,19 +2149,45 @@ Tecnico: ${tecnicoNome}`;
                       </div>
                   </div>
 
-                  {/* PANNELLO DESTRO: MAPPA GIGANTE AFFIANCATA */}
+                  {/* PANNELLO DESTRO: MAPPA GIGANTE CON LEGENDA E BADGE DIFFERENZIATI */}
                   <div className="hidden md:block flex-1 bg-slate-100 relative z-0">
+                      {/* LEGENDA MAPPA */}
+                      <div className="absolute top-3 right-3 z-[500] bg-white/95 backdrop-blur-xs border border-slate-200 rounded-xl px-3 py-2 shadow-md flex items-center gap-3 text-[11px] font-bold">
+                          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-slate-900 inline-block"></span> Ordinario</span>
+                          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-indigo-600 inline-block"></span> Pregresso (P)</span>
+                          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-orange-600 inline-block"></span> SOS Reso</span>
+                      </div>
+
                       {leafletLoaded ? (
                           <MapContainer key={giornoSceltoFiltro} center={[SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG]} zoom={11} style={{ height: "100%", width: "100%" }}>
                               <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                              {listaAttiva.filter(i => i.lat && i.lng && !i.isDistinta).map((c, idx) => (
-                                  <Marker key={c.codice} position={[c.lat, c.lng]} icon={createNumberedIcon(idx + 1)}>
+                              {tappeMappaGiorno.map((c, idx) => (
+                                  <Marker
+                                      key={c.codice}
+                                      position={[c.lat, c.lng]}
+                                      icon={createNumberedIcon(idx + 1, !!c.isPregresso, !!c.resoEstintori)}
+                                  >
                                       <Popup>
-                                          <div className="p-1">
-                                              <p className="font-bold text-xs text-slate-900">#{idx + 1} - {c.nome}</p>
-                                              <p className="text-[10px] text-slate-600">{c.indirizzo}, {c.localita}</p>
+                                          <div className="p-1 min-w-[160px]">
+                                              {c.isPregresso ? (
+                                                  <span className="inline-block bg-indigo-100 text-indigo-900 font-extrabold text-[9px] px-1.5 py-0.5 rounded mb-1">
+                                                      🔒 IMPEGNO PREGRESSO (P{idx + 1})
+                                                  </span>
+                                              ) : c.resoEstintori ? (
+                                                  <span className="inline-block bg-orange-100 text-orange-900 font-extrabold text-[9px] px-1.5 py-0.5 rounded mb-1">
+                                                      📦 SOS RESO (#{idx + 1})
+                                                  </span>
+                                              ) : (
+                                                  <span className="inline-block bg-slate-100 text-slate-800 font-extrabold text-[9px] px-1.5 py-0.5 rounded mb-1">
+                                                      🔧 TAPPA #{idx + 1}
+                                                  </span>
+                                              )}
+                                              <p className="font-bold text-xs text-slate-900">{c.nome}</p>
+                                              <p className="text-[10px] text-slate-600">{c.indirizzo}{c.localita ? `, ${c.localita}` : ""}</p>
                                               {c.telefono && <p className="text-[10px] font-mono text-slate-700 mt-0.5">📞 {c.telefono}</p>}
-                                              <p className="text-[10px] font-mono font-bold text-blue-600 mt-1">{c.oraInizio || "Sospeso"} ({c.minutiLavoro}m)</p>
+                                              <p className="text-[10px] font-mono font-bold text-blue-600 mt-1">
+                                                  {c.oraInizio ? `${c.oraInizio} - ${c.oraFine}` : "Sospeso"} ({c.minutiLavoro}m)
+                                              </p>
                                           </div>
                                       </Popup>
                                   </Marker>
@@ -2086,7 +2201,7 @@ Tecnico: ${tecnicoNome}`;
                   </div>
               </div>
           ) : (
-              /* SCHERMATA INIZIALE RICCA QUANDO NESSUN FILE È ANCORA ELABORATO */
+              /* SCHERMATA INIZIALE */
               <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-center">
                   <div className="max-w-4xl w-full">
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
@@ -2104,9 +2219,9 @@ Tecnico: ${tecnicoNome}`;
                           </div>
                           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs relative overflow-hidden">
                               <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl inline-block mb-3"><Sliders size={24}/></div>
-                              <span className="bg-emerald-100 text-emerald-800 font-extrabold text-[10px] px-2.5 py-1 rounded-md ml-2 uppercase">3. Multi-Agente IA</span>
+                              <span className="bg-emerald-100 text-emerald-800 font-extrabold text-[10px] px-2.5 py-1 rounded-md ml-2 uppercase">3. Cono di Rientro IA</span>
                               <h3 className="font-extrabold text-slate-900 text-base mb-1">Genera Plancia & Mappa</h3>
-                              <p className="text-xs text-slate-500 leading-relaxed">Premi <strong>Genera Plancia</strong>: Cartografo, Cronometrista e Supervisore creeranno i giri ottimali.</p>
+                              <p className="text-xs text-slate-500 leading-relaxed">Premi <strong>Genera Plancia</strong>: i cantieri verranno ordinati dal più lontano al più vicino alla Sede.</p>
                           </div>
                       </div>
                   </div>
@@ -2148,7 +2263,7 @@ Tecnico: ${tecnicoNome}`;
         </div>
       )}
 
-      {/* MODALE DETTAGLIO SCHEDA CLIENTE */}
+      {/* MODALE DETTAGLIO SCHEDA CLIENTE / DISTINTA */}
       {clienteSelezionatoScheda && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 overflow-y-auto print:hidden">
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8 relative border border-slate-200 my-auto max-h-[90vh] flex flex-col">
@@ -2157,10 +2272,10 @@ Tecnico: ${tecnicoNome}`;
             {clienteSelezionatoScheda.isDistinta ? (
               <>
                 <div className="flex items-center gap-4 mb-6">
-                  <div className="p-4 bg-slate-100 text-slate-900 rounded-xl border border-slate-200"><Package size={24} /></div>
+                  <div className="p-4 bg-orange-100 text-orange-900 rounded-xl border border-orange-200"><Package size={24} /></div>
                   <div>
-                    <span className="bg-slate-100 text-slate-700 font-mono text-[10px] px-2 py-0.5 rounded border border-slate-200 font-bold mb-1 inline-block">MAGAZZINO</span>
-                    <h2 className="text-xl font-extrabold text-slate-900">Distinta di Carico</h2>
+                    <span className="bg-orange-100 text-orange-800 font-mono text-[10px] px-2 py-0.5 rounded border border-orange-200 font-bold mb-1 inline-block">07:00 - 08:00 • MAGAZZINO</span>
+                    <h2 className="text-xl font-extrabold text-slate-900">{clienteSelezionatoScheda.nome}</h2>
                   </div>
                 </div>
                 <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 text-xs whitespace-pre-wrap font-mono leading-relaxed mb-6 overflow-y-auto flex-1">
@@ -2215,7 +2330,7 @@ Tecnico: ${tecnicoNome}`;
         </div>
       )}
 
-      {/* VISTA STAMPA FOGLIO DI VIAGGIO COMPLETA CON REFERENTI E TELEFONI */}
+      {/* VISTA STAMPA FOGLIO DI VIAGGIO */}
       <div className="hidden print:block w-full text-black bg-white font-sans text-sm p-6">
          {giorniVisibiliPerStampa.map((dataStr: any) => {
             const interventiGiorno = interventiGrezzi.filter(i => i.dataAssegnata === dataStr && (i.selezionatoPerGiro || i.isPregresso));
