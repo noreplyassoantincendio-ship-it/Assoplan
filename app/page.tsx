@@ -7,11 +7,11 @@ import Papa from "papaparse";
 import dynamic from "next/dynamic";
 import {
   UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet,
-  Zap, UserCheck, Printer, Calendar, CheckSquare, Mail,
-  FileText, X, Sliders, Check, PauseCircle, ExternalLink,
-  CheckCircle, Lock, CalendarPlus, Phone, Book, User,
-  Banknote, Home as HomeIcon, AlertOctagon, MessageSquare,
-  ArrowRightLeft, List, FileUp
+  Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Mail, Timer,
+  FileText, X, Sliders, Check, PauseCircle, ExternalLink, AlertTriangle,
+  CheckCircle, PlayCircle, Lock, CalendarPlus, Phone, Book, User,
+  Banknote, Car, Home as HomeIcon, AlertOctagon, MessageSquare,
+  ArrowRightLeft, List, FileUp, Wrench
 } from "lucide-react";
 
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
@@ -37,10 +37,28 @@ const formattaDataVisuale = (dataStr: string) => {
   return dataStr;
 };
 
+const OrarioInMinuti = (oraStr: string, fallback = 480) => {
+  if (!oraStr || typeof oraStr !== "string" || !oraStr.includes(":")) return fallback;
+  const [h, m] = oraStr.split(":").map(Number);
+  if (isNaN(h) || isNaN(m)) return fallback;
+  return h * 60 + m;
+};
+
+const MinutiInOrario = (min: number) => {
+  const hh = String(Math.floor(min / 60)).padStart(2, "0");
+  const mm = String(Math.floor(min % 60)).padStart(2, "0");
+  return `${hh}:${mm}`;
+};
+
+const deveMostrareDC = (nomeCliente: string) => {
+  const n = String(nomeCliente || "").toUpperCase();
+  if (n.includes("ASL") || n.includes("ADE") || n.includes("ADER")) return false;
+  return true;
+};
+
 const getNextWeekDays = () => {
   const today = new Date();
   const dayOfWeek = today.getDay(); 
-  
   const daysToMonday = dayOfWeek === 0 ? 1 : (dayOfWeek === 6 ? 2 : 1 - dayOfWeek);
   
   const startMonday = new Date(today);
@@ -270,7 +288,7 @@ export default function Home() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [messages, setMessages] = useState([
-    { sender: 'ai', text: 'Ciao! Sono il tuo assistente operativo. Carica il file Excel e chiedimi di pianificare o spostare cantieri.' }
+    { sender: 'ai', text: 'Ciao! Sono il tuo assistente operativo. Dimmi pure quali cantieri vuoi spostare, riordinare o inserire dai sospesi.' }
   ]);
   const [chatLoading, setChatLoading] = useState(false);
   
@@ -506,7 +524,7 @@ export default function Home() {
     let tags = [];
     if (cliente.haInsoluto) tags.push("[INS]");
     if (cliente.resoEstintori) tags.push("[SOS]");
-    if (!cliente.nome.toUpperCase().includes("ASL")) tags.push("[DC]");
+    if (deveMostrareDC(cliente.nome)) tags.push("[DC]");
     
     const tagString = tags.length > 0 ? tags.join(" ") + " " : "";
     return `${tagString}${cliente.nome} - BI ${cliente.numeroBi}`;
@@ -550,11 +568,17 @@ https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${clien
 Tecnico: ${tecnicoNome}`;
   };
 
-  const ricalcolaDistinteEOrari = async (listaDaOrdinare: any[], statsLocali: any[] = giornateStats, usaOrdinamentoGeografico = true) => {
+  // MOTORE ORARIO CON INCASTRO MATTINA/POMERIGGIO ATTORNO AI PREGRESSI
+  const ricalcolaDistinteEOrari = async (
+      listaDaOrdinare: any[],
+      statsLocali: any[] = giornateStats,
+      usaOrdinamentoGeografico = false,
+      scartaOvertimeAutomatico = false
+  ) => {
       const listaPulita = listaDaOrdinare.filter(i => !i.isDistinta && i.dataAssegnata && typeof i.dataAssegnata === 'string');
       const mapGiorni = new globalThis.Map();
       const vecchieDistinte = listaDaOrdinare.filter(i => i.isDistinta);
-      const nuoveStats = statsLocali.map(g => ({ ...g }));
+      const nuoveStats = statsLocali.map(g => ({ ...g, orarioFineMinuti: 8 * 60, statoGiornata: "APERTO" }));
       
       const scartatiTemporanei: any[] = []; 
 
@@ -566,89 +590,93 @@ Tecnico: ${tecnicoNome}`;
       const nuovaLista: any[] = [];
 
       for (const [dataStr, interventiGiorno] of Array.from(mapGiorni.entries())) {
-        const stat = statsLocali.find(g => g.dataStr === dataStr);
-        let orarioCorrenteMinuti = 8 * 60; 
+        let orarioCorrenteMinuti = 8 * 60; // Partenza alle 08:00
         let ultimaCoordGiorno: { lat: number; lng: number } | null = null;
-        let listaFinaleGiorno: any[] = [];
-        
-        if (usaOrdinamentoGeografico) {
-            let daOrdinare = interventiGiorno.filter(i => !i.isPregresso && i.selezionatoPerGiro);
-            const pregressiGiorno = interventiGiorno.filter(c => c.isPregresso);
-            
-            if (pregressiGiorno.length > 0) {
-                let maxPregressoEnd = 8 * 60;
-                pregressiGiorno.forEach(p => {
-                    const oraFineStr = p.oraFine || "18:00";
-                    const [h, m] = String(oraFineStr).split(":").map(Number);
-                    const fine = (Number(h) * 60) + Number(m);
-                    if (fine > maxPregressoEnd) maxPregressoEnd = fine;
-                    if (p.lat && p.lng && !ultimaCoordGiorno) {
-                        ultimaCoordGiorno = { lat: p.lat, lng: p.lng };
-                    }
-                });
-                orarioCorrenteMinuti = Math.max(Number(orarioCorrenteMinuti), Number(maxPregressoEnd) + 30);
-                if (orarioCorrenteMinuti >= INIZIO_PAUSA && orarioCorrenteMinuti < FINE_PAUSA) {
-                    orarioCorrenteMinuti = FINE_PAUSA;
-                }
-            } else if (stat && stat.anchorLat) {
-                ultimaCoordGiorno = { lat: stat.anchorLat, lng: stat.anchorLng };
-            }
 
-            let ordinatiGoogle = [];
-            let currPos = ultimaCoordGiorno || { lat: SEDE_UFFICIO_LAT, lng: SEDE_UFFICIO_LNG };
-            
+        // Separiamo i pregressi (ordinati per oraInizio) dai cantieri normali
+        const pregressiFila = interventiGiorno
+            .filter((c: any) => c.isPregresso)
+            .sort((a: any, b: any) => OrarioInMinuti(a.oraInizio, 480) - OrarioInMinuti(b.oraInizio, 480));
+
+        let normaliFila = interventiGiorno.filter((c: any) => !c.isPregresso && c.selezionatoPerGiro);
+
+        if (usaOrdinamentoGeografico && normaliFila.length > 1) {
+            let daOrdinare = [...normaliFila];
+            let ordinatiGeo = [];
+            let currPos = { lat: SEDE_UFFICIO_LAT, lng: SEDE_UFFICIO_LNG };
             while (daOrdinare.length > 0) {
-                daOrdinare.sort((a,b) => calcolaDistanzaKm(currPos.lat, currPos.lng, a.lat, a.lng) - calcolaDistanzaKm(currPos.lat, currPos.lng, b.lat, b.lng));
+                daOrdinare.sort((a, b) => calcolaDistanzaKm(currPos.lat, currPos.lng, a.lat, a.lng) - calcolaDistanzaKm(currPos.lat, currPos.lng, b.lat, b.lng));
                 const next = daOrdinare.shift();
-                ordinatiGoogle.push(next);
+                ordinatiGeo.push(next);
                 if (next.lat && next.lng) currPos = { lat: next.lat, lng: next.lng };
             }
-
-            listaFinaleGiorno = [...pregressiGiorno, ...ordinatiGoogle];
-        } else {
-            listaFinaleGiorno = [...interventiGiorno];
-            if (stat && stat.anchorLat && (!listaFinaleGiorno[0] || !listaFinaleGiorno[0].isPregresso)) {
-                ultimaCoordGiorno = { lat: stat.anchorLat, lng: stat.anchorLng };
-            }
+            normaliFila = ordinatiGeo;
         }
 
         let furgone = 0; let piccoNegativo = 0; let totaleMovimenti = 0;
         let prevCliente: any = null;
-        ultimaCoordGiorno = null;
-        
-        let clientiAmmessi = [];
+        let clientiAmmessi: any[] = [];
 
-        for (const c of listaFinaleGiorno) {
-            if (c.isPregresso) {
-                const oraFineStr = c.oraFine || "18:00";
-                const [hEnd, mEnd] = String(oraFineStr).split(":").map(Number);
-                
-                const finePregressoMinuti = (Number(hEnd) * 60 + Number(mEnd));
-                orarioCorrenteMinuti = Math.max(Number(orarioCorrenteMinuti), finePregressoMinuti + 30);
-                
+        let idxPreg = 0;
+        let idxNorm = 0;
+
+        while (idxPreg < pregressiFila.length || idxNorm < normaliFila.length) {
+            const proxPreg = idxPreg < pregressiFila.length ? pregressiFila[idxPreg] : null;
+            const proxNorm = idxNorm < normaliFila.length ? normaliFila[idxNorm] : null;
+
+            let prendiPregresso = false;
+
+            if (proxPreg && !proxNorm) {
+                prendiPregresso = true;
+            } else if (proxPreg && proxNorm) {
+                const startPregMin = OrarioInMinuti(proxPreg.oraInizio, 480);
+                const puntoPartenza = ultimaCoordGiorno || { lat: SEDE_UFFICIO_LAT, lng: SEDE_UFFICIO_LNG };
+                const { minuti: minViaggioTest } = await calcolaTempoDistanzaGoogle(puntoPartenza.lat, puntoPartenza.lng, proxNorm.lat, proxNorm.lng);
+                const { fineLavoro: fineNormTest } = calcolaTempistiche(orarioCorrenteMinuti, minViaggioTest, proxNorm.minutiLavoro);
+
+                // Se il cantiere normale finisce prima dell'inizio del pregresso (con 10 min di margine), lo incastriamo PRIMA del pregresso!
+                if (fineNormTest + 10 <= startPregMin) {
+                    prendiPregresso = false;
+                } else {
+                    prendiPregresso = true;
+                }
+            }
+
+            if (prendiPregresso && proxPreg) {
+                idxPreg++;
+                const c = proxPreg;
+                const finePregMin = OrarioInMinuti(c.oraFine, 1080);
+
                 if (prevCliente && ultimaCoordGiorno && c.lat && c.lng) {
                     const { minuti } = await calcolaTempoDistanzaGoogle(ultimaCoordGiorno.lat, ultimaCoordGiorno.lng, c.lat, c.lng);
                     prevCliente.minutiVersoProssimo = Number(minuti);
                     prevCliente.isRientroSede = false;
+                    c.minutiDaPrecedente = Number(minuti);
+                } else {
+                    c.minutiDaPrecedente = 0;
                 }
-                
-                c.minutiDaPrecedente = 0;
+
                 c.isPartenzaDaSede = !prevCliente;
+                orarioCorrenteMinuti = Math.max(orarioCorrenteMinuti, finePregMin + 15);
+                if (orarioCorrenteMinuti >= INIZIO_PAUSA && orarioCorrenteMinuti < FINE_PAUSA) {
+                    orarioCorrenteMinuti = FINE_PAUSA;
+                }
                 if (c.lat && c.lng) ultimaCoordGiorno = { lat: c.lat, lng: c.lng };
                 prevCliente = c;
                 clientiAmmessi.push(c);
-            } else {
+            } else if (proxNorm) {
+                idxNorm++;
+                const c = proxNorm;
                 const puntoPartenza = ultimaCoordGiorno || { lat: SEDE_UFFICIO_LAT, lng: SEDE_UFFICIO_LNG };
                 const { minuti: minViaggio } = await calcolaTempoDistanzaGoogle(puntoPartenza.lat, puntoPartenza.lng, c.lat, c.lng);
-
                 const { inizioLavoro, fineLavoro } = calcolaTempistiche(orarioCorrenteMinuti, minViaggio, c.minutiLavoro);
-                
-                if (Number(fineLavoro) > 1080) {
-                   c.selezionatoPerGiro = false;
-                   c.dataAssegnata = null;
-                   c.motivoSospeso = "Scartato per Limite Orario (Overtime)";
-                   scartatiTemporanei.push(c);
-                   continue; 
+
+                if (scartaOvertimeAutomatico && Number(fineLavoro) > 1080) {
+                    c.selezionatoPerGiro = false;
+                    c.dataAssegnata = null;
+                    c.motivoSospeso = "Scartato per Limite Orario (Overtime > 18:00)";
+                    scartatiTemporanei.push(c);
+                    continue;
                 }
 
                 c.minutiDaPrecedente = Number(minViaggio);
@@ -659,23 +687,18 @@ Tecnico: ${tecnicoNome}`;
                     prevCliente.isRientroSede = false;
                 }
 
-                const hhStart = String(Math.floor(inizioLavoro / 60)).padStart(2, '0');
-                const mmStart = String(inizioLavoro % 60).padStart(2, '0');
-                const hhEnd = String(Math.floor(fineLavoro / 60)).padStart(2, '0');
-                const mmEnd = String(fineLavoro % 60).padStart(2, '0');
-
-                c.oraInizio = `${hhStart}:${mmStart}`;
-                c.oraFine = `${hhEnd}:${mmEnd}`;
+                c.oraInizio = MinutiInOrario(inizioLavoro);
+                c.oraFine = MinutiInOrario(fineLavoro);
 
                 orarioCorrenteMinuti = fineLavoro;
-                ultimaCoordGiorno = { lat: c.lat, lng: c.lng };
+                if (c.lat && c.lng) ultimaCoordGiorno = { lat: c.lat, lng: c.lng };
                 prevCliente = c;
 
                 let delta = c.resoEstintori ? c.muletti_eorv : -c.muletti_eorv;
                 furgone += delta;
                 totaleMovimenti += c.muletti_eorv;
                 if (furgone < piccoNegativo) piccoNegativo = furgone;
-                
+
                 clientiAmmessi.push(c);
             }
         }
@@ -696,13 +719,14 @@ Tecnico: ${tecnicoNome}`;
         const scortaJolly = Math.max(2, Math.ceil(fabbisognoNetto * 0.20));
         const totaleDaCaricare = fabbisognoNetto + scortaJolly;
 
-        let descStr = `🛠 DISTINTA MULETTI:\n\n• Fabbisogno Netto: ${fabbisognoNetto} pz\n• Scorta Jolly (20%): ${scortaJolly} pz\n-----------------------------------\nTOTALE MULETTI DA CARICARE: ${totaleDaCaricare} pz\n-----------------------------------\n(Movimentazione totale: ${totaleMovimenti} pz)`;
+        let descStr = `🛠 DISTINTA MULETTI:\n• Fabbisogno Netto: ${fabbisognoNetto} pz\n• Scorta Jolly (20%): ${scortaJolly} pz\n-----------------------------------\nTOTALE MULETTI DA CARICARE: ${totaleDaCaricare} pz\n-----------------------------------\n(Movimentazione totale: ${totaleMovimenti} pz)`;
 
         const primaRiga = clientiAmmessi[0] || { giorno: getNomeGiorno(dataStr) };
         const oldDistinta = vecchieDistinte.find(d => d.dataAssegnata === dataStr);
 
         const distintaObj = {
-            codice: `DISTINTA_${dataStr}`, isDistinta: true, nome: `📦 DISTINTA DI CARICO (${formattaDataVisuale(dataStr)})`, numeroBi: "MAGAZZINO", indirizzo: "Sede Asso Antincendio", localita: "Genova", minutiLavoro: 60, giorno: primaRiga.giorno, dataAssegnata: dataStr, oraInizio: "07:00", oraFine: "08:00", descrizioneDistinta: descStr, selezionatoPerGiro: true, syncedToGoogle: oldDistinta ? oldDistinta.syncedToGoogle : false, lat: SEDE_UFFICIO_LAT, lng: SEDE_UFFICIO_LNG
+            codice: `DISTINTA_${dataStr}`, isDistinta: true, nome: `📦 DISTINTA DI CARICO (${formattaDataVisuale(dataStr)})`, numeroBi: "MAGAZZINO", indirizzo: "Sede Asso Antincendio", localita: "Genova", minutiLavoro: 60, giorno: primaRiga.giorno, dataAssegnata: dataStr, oraInizio: "07:00", oraFine: "08:00", descrizioneDistinta: descStr, selezionatoPerGiro: true, syncedToGoogle: oldDistinta ? oldDistinta.syncedToGoogle : false, lat: SEDE_UFFICIO_LAT, lng: SEDE_UFFICIO_LNG,
+            fabbisognoNetto, scortaJolly, totaleDaCaricare, totaleMovimenti
         };
 
         distintaObj.descrizioneDistinta = generaDescrizioneEvento(distintaObj, tecnicoSelezionato.nome, tecnicoSelezionato.email, clientiAmmessi);
@@ -762,11 +786,12 @@ Tecnico: ${tecnicoNome}`;
           const datiRubrica = rubricaClienti[codPerRubrica] || {};
           const telDaUsare = String(datiRubrica.cellulare || datiRubrica.telefono || riga.telefono || riga.TELEFONO || riga.tel || riga.TEL || "");
           const emailDaUsare = String(datiRubrica.email || riga.email || riga.EMAIL || riga['e-mail'] || "");
-          const contattoDaUsare = String(datiRubrica.contatto || "");
+          const contattoDaUsare = String(datiRubrica.contatto || riga.referente || riga.REFERENTE || riga.contatto || "");
 
           if (!clientiMappa.has(idUnivocoCantiere)) {
             clientiMappa.set(idUnivocoCantiere, {
-              codice: idUnivocoCantiere, 
+              codice: idUnivocoCantiere,
+              codiceCliente: codPerRubrica,
               numeroBi: numeroBi || "BI-GENERICA", 
               nome: String(riga.desclifor || "Sconosciuto"),
               indirizzo: String(riga.indirizzo || riga.INDIRIZZO || ""), 
@@ -781,8 +806,13 @@ Tecnico: ${tecnicoNome}`;
           const cliente = clientiMappa.get(idUnivocoCantiere);
           const testoRiga = JSON.stringify(riga).toUpperCase();
           const numFattura = riga.numft ? String(riga.numft).trim() : "";
-          if (numFattura !== "" && numFattura !== "-" && (parseFloat(riga.imptotft) || 0) > 0 && !String(riga.codpagam || "").toUpperCase().trim().startsWith("RB")) cliente.haInsoluto = true;
-          if (String(riga.codclose || "").toUpperCase().trim() === "SOS" || testoRiga.includes("SOS")) cliente.resoEstintori = true;
+          const valNomod = String(riga.nomod || riga.NOMOD || "").toUpperCase().trim();
+          if (valNomod === "VERO" || valNomod === "TRUE" || (numFattura !== "" && numFattura !== "-" && (parseFloat(riga.imptotft) || 0) > 0 && !String(riga.codpagam || "").toUpperCase().trim().startsWith("RB"))) {
+              cliente.haInsoluto = true;
+          }
+          if (String(riga.codclose || riga.SOS || riga.sos || "").toUpperCase().trim() === "SOS" || String(riga.SOS || riga.sos || "").toUpperCase().trim() === "VERO" || testoRiga.includes('"SOS"')) {
+              cliente.resoEstintori = true;
+          }
 
           const qta = Number(riga.quantita) || 0;
           const desc = String(riga.desdocrig || "");
@@ -801,7 +831,7 @@ Tecnico: ${tecnicoNome}`;
           cliente._maxMt.rv = Math.max(cliente._maxMt.rv, Number(riga.eo_rv || riga.EO_RV) || 0);
         }
 
-        setProgressIA({ active: true, percent: 45, text: "Calcolo Geografico (Google Maps API)..." });
+        setProgressIA({ active: true, percent: 45, text: "Calcolo Geografico e Rapportini..." });
         for (const cliente of Array.from(clientiMappa.values())) {
             if (cliente.resoEstintori) {
                 let veriMuletti = cliente._maxMt.rv || 0;
@@ -813,7 +843,7 @@ Tecnico: ${tecnicoNome}`;
                 } else {
                     cliente.minutiLavoro = 10;
                     cliente.totaleArticoli = 0;
-                    cliente.dettaglioAttrezzature = [];
+                    cliente.dettaglioAttrezzature = [{ descrizione: "Ritiro/Restituzione SOS", quantita: 1, categoria: "SOS", minutiImpegno: 10 }];
                 }
             } else {
                 let sumQtaEstintori = 0;
@@ -851,14 +881,14 @@ Tecnico: ${tecnicoNome}`;
 
                 if (usaRighe) {
                     const itemsRighe = [
-                        { v: sumQtaEstintori, m: 2, n: "Estintori (Da Righe)" },
-                        { v: sumQtaIdranti, m: 2, n: "Idranti (Da Righe)" },
-                        { v: sumQtaPorte, m: 3, n: "Porte Tagliafuoco (Da Righe)" },
-                        { v: sumQtaUscite, m: 2, n: "Uscite Emergenza (Da Righe)" },
-                        { v: sumQtaLampade, m: 1, n: "Lampade Emergenza (Da Righe)" },
-                        { v: sumQtaIrai, m: 30, n: "Impianto Rilevazione (Da Righe)" },
-                        { v: sumQtaReti, m: 15, n: "Rete Idrica (Da Righe)" },
-                        { v: sumQtaGruppi, m: 20, n: "Gruppo Pressurizzazione (Da Righe)" }
+                        { v: sumQtaEstintori, m: 2, n: "Estintori" },
+                        { v: sumQtaIdranti, m: 2, n: "Idranti" },
+                        { v: sumQtaPorte, m: 3, n: "Porte REI" },
+                        { v: sumQtaUscite, m: 2, n: "Uscite Emergenza" },
+                        { v: sumQtaLampade, m: 1, n: "Lampade Emergenza" },
+                        { v: sumQtaIrai, m: 30, n: "Impianto IRAI" },
+                        { v: sumQtaReti, m: 15, n: "Rete Idrica" },
+                        { v: sumQtaGruppi, m: 20, n: "Gruppo Pompaggio" }
                     ];
                     itemsRighe.forEach(it => { 
                         if(it.v > 0) { 
@@ -868,14 +898,14 @@ Tecnico: ${tecnicoNome}`;
                     });
                 } else {
                     const itemsMt = [
-                        { v: cliente._maxMt.eo, m: 2, n: "Estintori (Manutenzione)" },
+                        { v: cliente._maxMt.eo, m: 2, n: "Estintori" },
                         { v: cliente._maxMt.id, m: 2, n: "Idranti" },
-                        { v: cliente._maxMt.po, m: 3, n: "Porte Tagliafuoco / REI" },
-                        { v: cliente._maxMt.ss, m: 2, n: "Uscite di Emergenza" },
-                        { v: cliente._maxMt.la, m: 1, n: "Lampade di Emergenza" },
-                        { v: cliente._maxMt.ir, m: 30, n: "Impianto Rilevazione (IRAI)" },
+                        { v: cliente._maxMt.po, m: 3, n: "Porte REI" },
+                        { v: cliente._maxMt.ss, m: 2, n: "Uscite Emergenza" },
+                        { v: cliente._maxMt.la, m: 1, n: "Lampade Emergenza" },
+                        { v: cliente._maxMt.ir, m: 30, n: "Impianto IRAI" },
                         { v: cliente._maxMt.ri, m: 15, n: "Rete Idrica" },
-                        { v: cliente._maxMt.gp, m: 20, n: "Gruppo Pressurizzazione" }
+                        { v: cliente._maxMt.gp, m: 20, n: "Gruppo Pompaggio" }
                     ];
                     itemsMt.forEach(it => { 
                         if(it.v > 0) { 
@@ -893,10 +923,6 @@ Tecnico: ${tecnicoNome}`;
                     cliente.dettaglioAttrezzature = dettaglio;
                 }
             }
-        }
-
-        if (righeScartate > 0) {
-            console.warn(`Attenzione: ${righeScartate} righe ignorate perché mancava la Ragione Sociale.`);
         }
 
         const datiConCoordinate = [];
@@ -943,7 +969,7 @@ Tecnico: ${tecnicoNome}`;
                 selezionatoPerGiro: true, syncedToGoogle: true,
                 minutiLavoro: evt.durataMinuti, lat: evt.lat, lng: evt.lng,
                 contatto, telefono, email, muletti_eorv: 0, origineCoord: "calendar",
-                descrizionePregressa: evt.description || "Nessun dettaglio da Google"
+                descrizionePregressa: evt.description || "Impegno pregresso da Google Calendar"
             };
         });
 
@@ -965,40 +991,22 @@ Tecnico: ${tecnicoNome}`;
 
         const giornateStrutturate = dateRange.map(g => {
           const pregressiDelGiorno = eventiPregressiUI.filter(e => e.dataAssegnata === g.dataStr);
-          let maxFineMinuti = 8 * 60;
-          let anchorLat: number | null = null; let anchorLng: number | null = null;
+          const minutiOccupatiDaPregressi = pregressiDelGiorno.reduce((acc, imp) => acc + (Number(imp.minutiLavoro) || 60), 0);
+          let minutiDisponibili = Math.max(0, 480 - minutiOccupatiDaPregressi);
+          let statoGiornata = minutiDisponibili < 60 ? "PIENO" : "APERTO";
 
-          pregressiDelGiorno.forEach(imp => {
-            const oraFineStr = imp.oraFine || "18:00";
-            const [h, m] = String(oraFineStr).split(":").map(Number);
-            const fine = (Number(h) * 60) + Number(m);
-            if (fine > maxFineMinuti) maxFineMinuti = fine;
-            if (imp.lat && imp.lng && !anchorLat) { anchorLat = imp.lat; anchorLng = imp.lng; }
-          });
-
-          if (maxFineMinuti > 8 * 60) maxFineMinuti += 30;
-
-          if (maxFineMinuti >= INIZIO_PAUSA && maxFineMinuti < FINE_PAUSA) {
-             maxFineMinuti = FINE_PAUSA;
-          }
-
-          maxFineMinuti = Math.min(maxFineMinuti, FINE_GIORNATA_ASSOLUTA);
-          let minutiDisponibili = Math.max(0, FINE_GIORNATA_ASSOLUTA - maxFineMinuti);
-          let statoGiornata = "APERTO";
-          if (minutiDisponibili < 60) { minutiDisponibili = 0; statoGiornata = "PIENO (Sospeso)"; }
-
-          return { ...g, minutiDisponibili, statoGiornata, anchorLat, anchorLng, orarioPartenzaMinuti: maxFineMinuti };
+          return { ...g, minutiDisponibili, statoGiornata, anchorLat: null, anchorLng: null, orarioPartenzaMinuti: 8 * 60, orarioFineMinuti: 8 * 60 };
         });
 
         let unassigned = [...clientiDaPianificare];
-        const clientiPianificati = [];
+        const clientiPianificati: any[] = [];
 
-        setProgressIA({ active: true, percent: 55, text: "Connessione all'Agente IA..." });
+        setProgressIA({ active: true, percent: 55, text: "Connessione ai 3 Agenti IA..." });
 
         let simInterval = setInterval(() => {
             setProgressIA(prev => {
                 if (prev.percent < 90) {
-                    return { ...prev, percent: prev.percent + 1, text: "Ragionamento IA in corso (incrocio vincoli e distanze)..." };
+                    return { ...prev, percent: prev.percent + 1, text: "Ragionamento IA in corso (Cartografo -> Cronometrista -> Supervisore)..." };
                 }
                 return prev;
             });
@@ -1008,18 +1016,25 @@ Tecnico: ${tecnicoNome}`;
             const payload = {
                 interventi: unassigned.map(c => ({
                     codice: c.codice,
+                    numeroBi: c.numeroBi,
                     nome: c.nome,
                     indirizzo: c.indirizzo,
                     localita: c.localita,
-                    minutiLavoro: c.minutiLavoro
+                    cap: c.cap,
+                    minutiLavoro: c.minutiLavoro,
+                    isSOS: c.resoEstintori
                 })),
                 giornate: giornateStrutturate.map(g => ({
                     dataStr: g.dataStr,
                     nomeGiorno: g.nomeGiorno,
+                    minutiDisponibili: g.minutiDisponibili,
                     pregressi: eventiPregressiUI.filter(p => p.dataAssegnata === g.dataStr).map(p => ({
+                        codice: p.codice,
                         nome: p.nome,
                         indirizzo: p.indirizzo,
-                        descrizione: p.descrizionePregressa
+                        oraInizio: p.oraInizio,
+                        oraFine: p.oraFine,
+                        minutiLavoro: p.minutiLavoro
                     }))
                 }))
             };
@@ -1042,21 +1057,24 @@ Tecnico: ${tecnicoNome}`;
 
             const iaResult = await res.json();
             
-            if (iaResult.success && iaResult.piano) {
+            if (iaResult.success && iaResult.piano && iaResult.piano.giorni) {
                 unassigned.forEach(c => {
                     let assigned = false;
                     for (const [dataStr, codici] of Object.entries(iaResult.piano.giorni)) {
-                        if ((codici as string[]).includes(c.codice)) {
+                        const arrCodici = codici as string[];
+                        const idx = arrCodici.indexOf(c.codice);
+                        if (idx !== -1) {
                             c.dataAssegnata = dataStr;
                             c.giorno = getNomeGiorno(dataStr);
                             c.selezionatoPerGiro = true;
+                            c._aiOrder = idx;
                             clientiPianificati.push(c);
                             assigned = true;
                             break;
                         }
                     }
                     if (!assigned) {
-                        clientiSospesiTmp.push({ ...c, motivoSospeso: "Scartato dall'IA (Logistica / Tempo)", selezionatoPerGiro: false, dataAssegnata: null });
+                        clientiSospesiTmp.push({ ...c, motivoSospeso: "In Sospeso (Logistica / Tempo)", selezionatoPerGiro: false, dataAssegnata: null });
                     }
                 });
             } else {
@@ -1075,18 +1093,18 @@ Tecnico: ${tecnicoNome}`;
 
         setProgressIA({ active: true, percent: 98, text: "Finalizzazione plancia logistica..." });
 
-        const datiCombinati = [...eventiPregressiUI, ...clientiPianificati].sort((a, b) => {
-            if (a.dataAssegnata !== b.dataAssegnata) return a.dataAssegnata.localeCompare(b.dataAssegnata);
-            if (a.isPregresso && !b.isPregresso) return -1;
-            if (!a.isPregresso && b.isPregresso) return 1;
-            if (a.isPregresso && b.isPregresso) return a.oraInizio.localeCompare(b.oraInizio);
-            return 0;
-        });
+        // Rispettiamo l'ordine restituito dall'IA
+        clientiPianificati.sort((a, b) => (a._aiOrder ?? 999) - (b._aiOrder ?? 999));
+        const datiCombinati = [...eventiPregressiUI, ...clientiPianificati];
 
-        const resRic = await ricalcolaDistinteEOrari(datiCombinati, giornateStrutturate, true);
+        const resRic = await ricalcolaDistinteEOrari(datiCombinati, giornateStrutturate, true, true);
         setInterventiGrezzi(resRic.listaOrdinata);
         setGiornateStats(resRic.statsAggiornate);
-        setClientiInSospeso(clientiSospesiTmp); 
+        setClientiInSospeso(prev => {
+            const codiciSosp = new Set(clientiSospesiTmp.map(s => s.codice));
+            const extra = prev.filter(p => !codiciSosp.has(p.codice) && !clientiPianificati.some(cp => cp.codice === p.codice));
+            return [...clientiSospesiTmp, ...extra];
+        });
         setClientiGiaCalendarizzati(clientiScartatiTmp);
         
         if (giornateStrutturate.length > 0) {
@@ -1153,6 +1171,7 @@ Tecnico: ${tecnicoNome}`;
           if (dataDestinazione) {
               item.dataAssegnata = dataDestinazione;
               item.giorno = getNomeGiorno(dataDestinazione);
+              item.selezionatoPerGiro = true;
               
               if (targetCodice) {
                   const targetIndex = result.findIndex(i => i.codice === targetCodice && i.dataAssegnata === dataDestinazione);
@@ -1165,15 +1184,16 @@ Tecnico: ${tecnicoNome}`;
                   result.push(item);
               }
               
-              const resRic = await ricalcolaDistinteEOrari(result, giornateStats, false);
+              // scartaOvertimeAutomatico = false per non annullare mai lo spostamento manuale dell'utente
+              const resRic = await ricalcolaDistinteEOrari(result, giornateStats, false, false);
               setGiornateStats(resRic.statsAggiornate);
               setInterventiGrezzi(resRic.listaOrdinata);
           } else {
               item.dataAssegnata = null;
               item.selezionatoPerGiro = false;
-              item.motivoSospeso = "Spostato manualmente";
+              item.motivoSospeso = "Spostato manualmente in Sospesi";
               setClientiInSospeso(prev => [...prev, item]);
-              const resRic = await ricalcolaDistinteEOrari(result, giornateStats, false);
+              const resRic = await ricalcolaDistinteEOrari(result, giornateStats, false, false);
               setGiornateStats(resRic.statsAggiornate);
               setInterventiGrezzi(resRic.listaOrdinata);
           }
@@ -1209,6 +1229,7 @@ Tecnico: ${tecnicoNome}`;
     e.target.value = '';
   };
 
+  // CHAT IA ARRICCHITA CON CONTESTO COMPLETO (GIORNI, LOCALITÀ, BI, ORARI)
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim() || chatLoading) return;
@@ -1218,14 +1239,14 @@ Tecnico: ${tecnicoNome}`;
     setMessages(updatedMessages);
     setChatInput('');
     setChatLoading(true);
-    setProgressIA({ active: true, percent: 10, text: "Analisi della richiesta in chat..." });
+    setProgressIA({ active: true, percent: 15, text: "Esecuzione comando IA in corso..." });
 
     let simInterval = setInterval(() => {
         setProgressIA(prev => {
-            if (prev.percent < 90) return { ...prev, percent: prev.percent + 1, text: "Rielaborazione piano IA in corso..." };
+            if (prev.percent < 90) return { ...prev, percent: prev.percent + 2, text: "Aggiornamento plancia secondo le tue istruzioni..." };
             return prev;
         });
-    }, 800);
+    }, 600);
 
     try {
       const res = await fetch('/api/planner', {
@@ -1235,8 +1256,37 @@ Tecnico: ${tecnicoNome}`;
           action: 'modifica_chat',
           comandoUtente: userMessage,
           statoAttuale: {
-            interventi: interventiGrezzi.filter(i => !i.isDistinta).map(i => ({ codice: i.codice, nome: i.nome, dataAssegnata: i.dataAssegnata })),
-            sospesi: clientiInSospeso.map(s => ({ codice: s.codice, nome: s.nome }))
+            giornateDisponibili: giornateStats.map(g => ({
+              dataStr: g.dataStr,
+              nomeGiorno: g.nomeGiorno
+            })),
+            interventiInRotta: interventiGrezzi.filter(i => !i.isDistinta).map(i => ({
+              codice: i.codice,
+              numeroBi: i.numeroBi,
+              nome: i.nome,
+              indirizzo: i.indirizzo,
+              localita: i.localita,
+              cap: i.cap,
+              dataAssegnata: i.dataAssegnata,
+              nomeGiorno: getNomeGiorno(i.dataAssegnata),
+              oraInizio: i.oraInizio,
+              oraFine: i.oraFine,
+              minutiLavoro: i.minutiLavoro,
+              isPregresso: !!i.isPregresso,
+              isSOS: !!i.resoEstintori,
+              isInsoluto: !!i.haInsoluto
+            })),
+            sospesi: clientiInSospeso.map(s => ({
+              codice: s.codice,
+              numeroBi: s.numeroBi,
+              nome: s.nome,
+              indirizzo: s.indirizzo,
+              localita: s.localita,
+              cap: s.cap,
+              minutiLavoro: s.minutiLavoro,
+              isSOS: !!s.resoEstintori,
+              isInsoluto: !!s.haInsoluto
+            }))
           },
           history: updatedMessages.map(m => ({
             role: m.sender === 'user' ? 'user' : 'model',
@@ -1246,11 +1296,11 @@ Tecnico: ${tecnicoNome}`;
       });
 
       clearInterval(simInterval);
-      setProgressIA({ active: true, percent: 95, text: "Applicazione modifiche alla plancia..." });
+      setProgressIA({ active: true, percent: 95, text: "Applicazione modifiche e ricalcolo orari..." });
 
       const data = await res.json();
       if (data.success) {
-        const rispostaDiscorsiva = data.messaggioChat || "Ho aggiornato la pianificazione secondo le tue indicazioni.";
+        const rispostaDiscorsiva = data.messaggioChat || "Ho aggiornato la pianificazione come richiesto.";
         setMessages(prev => [...prev, { sender: 'ai', text: rispostaDiscorsiva }]);
         
         if (data.piano && data.piano.giorni) {
@@ -1260,6 +1310,12 @@ Tecnico: ${tecnicoNome}`;
             let nuoviSospesi: any[] = [];
 
             tuttaLaLista.forEach(item => {
+              // I pregressi restano sempre ancorati al loro giorno originale
+              if (item.isPregresso) {
+                nuoviAssegnati.push(item);
+                return;
+              }
+
               item._aiIndex = 9999; 
               let assegnato = false;
               
@@ -1282,24 +1338,24 @@ Tecnico: ${tecnicoNome}`;
                 if (data.piano.sospesi && (data.piano.sospesi as string[]).includes(item.codice)) {
                   item.selezionatoPerGiro = false;
                   item.dataAssegnata = null;
+                  item.motivoSospeso = "Spostato in Sospesi via Chat IA";
                   nuoviSospesi.push(item);
+                } else if (item.dataAssegnata) {
+                  nuoviAssegnati.push(item);
                 } else {
-                  if (item.dataAssegnata) {
-                    nuoviAssegnati.push(item);
-                  } else {
-                    item.selezionatoPerGiro = false;
-                    nuoviSospesi.push(item);
-                  }
+                  item.selezionatoPerGiro = false;
+                  nuoviSospesi.push(item);
                 }
               }
             });
 
             nuoviAssegnati.sort((a, b) => {
-               if (a.dataAssegnata !== b.dataAssegnata) return 0;
+               if (a.dataAssegnata !== b.dataAssegnata) return a.dataAssegnata.localeCompare(b.dataAssegnata);
                return (a._aiIndex || 0) - (b._aiIndex || 0);
             });
 
-            const resRic = await ricalcolaDistinteEOrari(nuoviAssegnati, giornateStats, false);
+            // Non scartiamo l'overtime in automatico così l'ordine dato in chat viene SEMPRE eseguito
+            const resRic = await ricalcolaDistinteEOrari(nuoviAssegnati, giornateStats, false, false);
             setInterventiGrezzi(resRic.listaOrdinata);
             setGiornateStats(resRic.statsAggiornate);
             setClientiInSospeso(nuoviSospesi);
@@ -1308,7 +1364,7 @@ Tecnico: ${tecnicoNome}`;
           }
         }
       } else {
-        setMessages(prev => [...prev, { sender: 'ai', text: 'Non sono riuscito ad applicare la modifica. Riprova.' }]);
+        setMessages(prev => [...prev, { sender: 'ai', text: `Errore: ${data.error || 'Non sono riuscito ad applicare la modifica.'}` }]);
       }
     } catch (err) {
       clearInterval(simInterval);
@@ -1335,7 +1391,7 @@ Tecnico: ${tecnicoNome}`;
           nuovaRubrica[String(cod).trim()] = {
             cellulare: findKey(["cell"]),
             telefono: findKey(["telefono", "tel"]),
-            contatto: findKey(["contatto", "referente"]),
+            contatto: findKey(["contatto", "referente", "persona"]),
             email: findKey(["email", "e-mail", "mail"])
           };
         }
@@ -1429,7 +1485,7 @@ Tecnico: ${tecnicoNome}`;
           const newClient = { ...clienteSospeso, settimana: `${formattaDataVisuale(dataInizio)} al ${formattaDataVisuale(dataFine)}`, giorno: giornoScelto, dataAssegnata: conf.data, oraInizio: conf.oraInizio, oraFine: `${hhEnd}:${mmEnd}`, selezionatoPerGiro: true, syncedToGoogle: true };
           
           setInElaborazione(true);
-          const resRic = await ricalcolaDistinteEOrari([...interventiGrezzi, newClient], giornateStats, true);
+          const resRic = await ricalcolaDistinteEOrari([...interventiGrezzi, newClient], giornateStats, false, false);
           setInterventiGrezzi(resRic.listaOrdinata);
           setGiornateStats(resRic.statsAggiornate);
           setInElaborazione(false);
@@ -1447,7 +1503,7 @@ Tecnico: ${tecnicoNome}`;
       const newClient = { ...clienteSospeso, settimana: `${formattaDataVisuale(dataInizio)} al ${formattaDataVisuale(dataFine)}`, giorno: getNomeGiorno(conf.data), dataAssegnata: conf.data, oraInizio: conf.oraInizio, oraFine: `${hhEnd}:${mmEnd}`, selezionatoPerGiro: true, syncedToGoogle: false };
       
       setInElaborazione(true);
-      const resRic = await ricalcolaDistinteEOrari([...interventiGrezzi, newClient], giornateStats, true);
+      const resRic = await ricalcolaDistinteEOrari([...interventiGrezzi, newClient], giornateStats, false, false);
       setInterventiGrezzi(resRic.listaOrdinata);
       setGiornateStats(resRic.statsAggiornate);
       setInElaborazione(false);
@@ -1501,10 +1557,10 @@ Tecnico: ${tecnicoNome}`;
     if (leafletRef.current) {
       return leafletRef.current.divIcon({
         className: "custom-marker-icon",
-        html: `<div style="background-color: #0f172a; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); font-size: 11px;">${numero}</div>`,
-        iconSize: [24, 24],
-        iconAnchor: [12, 24],
-        popupAnchor: [0, -24]
+        html: `<div style="background-color: #0f172a; color: white; border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.4); font-size: 11px;">${numero}</div>`,
+        iconSize: [26, 26],
+        iconAnchor: [13, 26],
+        popupAnchor: [0, -26]
       });
     }
     return undefined;
@@ -1602,7 +1658,7 @@ Tecnico: ${tecnicoNome}`;
         </div>
       )}
 
-      {/* HEADER PRINCIPALE COMPATTO MA COMPLETO */}
+      {/* HEADER PRINCIPALE */}
       <header className="w-full bg-white border-b border-slate-200 px-6 py-3 flex flex-wrap justify-between items-center gap-4 shrink-0 z-30 print:hidden">
          <div className="flex items-center gap-3">
             <span className="p-2 bg-blue-600 text-white rounded-xl shadow-sm"><Zap size={20} /></span>
@@ -1610,11 +1666,10 @@ Tecnico: ${tecnicoNome}`;
               <h1 className="text-lg font-extrabold tracking-tight text-slate-900 flex items-center gap-2">
                 Asso Antincendio <span className="text-blue-600 font-normal text-sm">| Smart Logistics</span>
               </h1>
-              <p className="text-[11px] text-slate-500">Rubrica in memoria, Pausa Pranzo Dinamica & Motore Multi-Agente IA</p>
+              <p className="text-[11px] text-slate-500">Rubrica Clienti, Dati Rapportino & Motore Multi-Agente IA</p>
             </div>
          </div>
 
-         {/* STRUMENTI RAPIDI E CONNESSIONI */}
          <div className="flex flex-wrap items-center gap-2">
             <Link href="/flussi" className="px-3 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold hover:bg-blue-100 transition flex items-center gap-1.5">
               📊 Gestione Flussi
@@ -1648,11 +1703,10 @@ Tecnico: ${tecnicoNome}`;
          </div>
       </header>
 
-      {/* CRUSCOTTO DI CONTROLLO OPERATIVO (SEMPRE VISIBILE) */}
+      {/* CRUSCOTTO DI CONTROLLO OPERATIVO */}
       <div className="bg-white border-b border-slate-200 px-6 py-3 shrink-0 z-20 print:hidden">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
           
-          {/* 1. PERIODO E GIORNI */}
           <div className="lg:col-span-4 flex flex-wrap items-center gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-extrabold uppercase text-slate-500">Dal</span>
@@ -1671,7 +1725,6 @@ Tecnico: ${tecnicoNome}`;
             </div>
           </div>
 
-          {/* 2. TECNICO, FILE EXCEL E AVVIO IA */}
           <div className="lg:col-span-4 flex flex-wrap items-center gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
             <select value={tecnicoSelezionato.nome} onChange={(e) => { const t = tecniciAnagrafica.find(t => t.nome === e.target.value); if(t) setTecnicoSelezionato(t); }} className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 focus:outline-none cursor-pointer flex-1 min-w-[140px]">
               {tecniciAnagrafica.map((t, idx) => <option key={idx} value={t.nome}>{t.nome}</option>)}
@@ -1692,7 +1745,6 @@ Tecnico: ${tecnicoNome}`;
             </button>
           </div>
 
-          {/* 3. CONTATORI RIEPILOGO */}
           <div className="lg:col-span-4 grid grid-cols-4 gap-2">
             <div className="px-3 py-1.5 bg-blue-50 rounded-xl border border-blue-200 flex flex-col justify-center">
               <span className="text-[9px] text-blue-700 font-bold uppercase truncate">In Carico</span>
@@ -1718,7 +1770,6 @@ Tecnico: ${tecnicoNome}`;
       {/* AREA PRINCIPALE: TAB GIORNI + SPLIT SCREEN */}
       <div className="flex-1 flex flex-col overflow-hidden print:hidden">
           
-          {/* BARRA DEI TAB (GIORNI + SALVA SU CALENDAR) */}
           {interventiGrezzi.length > 0 && (
               <div className="bg-white border-b border-slate-200 px-6 py-2 flex items-center justify-between gap-2 overflow-x-auto shrink-0 custom-scrollbar z-20">
                   <div className="flex items-center gap-2">
@@ -1769,131 +1820,242 @@ Tecnico: ${tecnicoNome}`;
               </div>
           )}
 
-          {/* SPLIT SCREEN CONTENUTO O WELCOME DASHBOARD */}
+          {/* SPLIT SCREEN: SCHEDE OPERATIVE COMPLETE A SINISTRA + MAPPA A DESTRA */}
           {interventiGrezzi.length > 0 ? (
               <div className="flex-1 flex overflow-hidden">
                   
-                  {/* PANNELLO SINISTRO: TABELLA DI MARCIA DEL GIORNO */}
-                  <div className="w-full md:w-[48%] lg:w-[44%] h-full bg-white border-r border-slate-200 flex flex-col z-10">
+                  {/* PANNELLO SINISTRO: SCHEDE COMPLETE CON REFERENTI, TELEFONI E RAPPORTINO */}
+                  <div className="w-full md:w-[54%] lg:w-[50%] h-full bg-white border-r border-slate-200 flex flex-col z-10">
                       
-                      <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
+                      <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
                           <div>
                               <h2 className="font-extrabold text-slate-900 text-sm uppercase tracking-tight">
-                                  {giornoSceltoFiltro === "sospesi" ? "⏸ Archivio Cantieri in Sospeso" : `📅 ${statGiornoAttivo?.nomeGiorno} ${formattaDataVisuale(giornoSceltoFiltro)}`}
+                                  {giornoSceltoFiltro === "sospesi" ? `⏸ Cantieri in Sospeso (${clientiInSospeso.length})` : `📅 ${statGiornoAttivo?.nomeGiorno} ${formattaDataVisuale(giornoSceltoFiltro)}`}
                               </h2>
                               <p className="text-[11px] text-slate-500 font-medium">
-                                  Usa l'icona ⇄ per spostare un cantiere in 2 clic, oppure clicca su 📄 per la scheda completa.
+                                  Trascina le schede per riordinare la giornata oppure usa ⇄ per cambiare giorno.
                               </p>
                           </div>
                           {statGiornoAttivo && (
                               <div className="text-right shrink-0">
                                   <span className={`text-xs font-extrabold px-2.5 py-1 rounded-lg flex items-center gap-1 ${statGiornoAttivo.orarioFineMinuti > 1080 ? 'bg-red-100 text-red-800 border border-red-200' : 'bg-emerald-100 text-emerald-800 border border-emerald-200'}`}>
                                       {statGiornoAttivo.orarioFineMinuti > 1080 ? <AlertOctagon size={13}/> : <CheckCircle size={13}/>}
-                                      Fine: {String(Math.floor(statGiornoAttivo.orarioFineMinuti / 60)).padStart(2, '0')}:{String(Math.floor(statGiornoAttivo.orarioFineMinuti % 60)).padStart(2, '0')}
+                                      Fine: {MinutiInOrario(statGiornoAttivo.orarioFineMinuti)}
                                   </span>
                               </div>
                           )}
                       </div>
 
-                      <div className="flex-1 overflow-y-auto p-3 space-y-1.5 custom-scrollbar" onDragOver={handleDragOverKanban} onDrop={(e) => handleDropToDay(e, giornoSceltoFiltro === "sospesi" ? null : giornoSceltoFiltro)}>
+                      <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar bg-slate-50/60" onDragOver={handleDragOverKanban} onDrop={(e) => handleDropToDay(e, giornoSceltoFiltro === "sospesi" ? null : giornoSceltoFiltro)}>
                           {listaAttiva.length === 0 ? (
-                              <div className="flex flex-col items-center justify-center h-48 text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl m-2">
+                              <div className="flex flex-col items-center justify-center h-48 text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl m-2 bg-white">
                                   <List size={28} className="mb-2 opacity-50" />
                                   <p className="text-xs font-bold">Nessun cantiere in questa vista</p>
                               </div>
                           ) : (
-                              listaAttiva.map((item, idx) => (
-                                  <div 
-                                      key={item.codice}
-                                      draggable={!(item.resoEstintori && item.giorniDallUltimoSos < 5) && !item.isPregresso && !item.isDistinta}
-                                      onDragStart={(e) => handleDragStartKanban(e, item.codice)}
-                                      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverCard(item.codice); }}
-                                      onDragLeave={() => setDragOverCard(null)}
-                                      onDrop={(e) => handleDropToDay(e, giornoSceltoFiltro === "sospesi" ? null : giornoSceltoFiltro, item.codice)}
-                                      onClick={() => {
-                                          if (giornoSceltoFiltro === "sospesi" && !(item.resoEstintori && item.giorniDallUltimoSos < 5)) {
-                                              apriModaleSospeso(item);
-                                          }
-                                      }}
-                                      className={`group relative flex items-center px-3 py-2 rounded-xl border transition-all
-                                          ${dragOverCard === item.codice ? 'border-t-4 border-t-blue-600 mt-1' : ''}
-                                          ${item.isPregresso ? 'bg-indigo-50/60 border-indigo-200 cursor-not-allowed' : item.isDistinta ? 'bg-orange-50/60 border-orange-200 cursor-default' : 'bg-white border-slate-200 hover:border-blue-400 cursor-grab active:cursor-grabbing shadow-xs hover:shadow-sm'}
-                                      `}
-                                  >
-                                      {giornoSceltoFiltro !== "sospesi" && !item.isDistinta && (
-                                          <div className="w-7 shrink-0 flex justify-center mr-1">
-                                              <span className="w-5 h-5 rounded-full bg-slate-900 text-white flex items-center justify-center text-[10px] font-bold">
-                                                  {idx + (listaAttiva[0]?.isDistinta ? 0 : 1)}
-                                              </span>
-                                          </div>
-                                      )}
+                              listaAttiva.map((item, idx) => {
+                                  const numTappa = idx + (listaAttiva[0]?.isDistinta ? 0 : 1);
 
-                                      <div className="flex-1 min-w-0 pr-16">
-                                          <div className="flex items-center gap-1.5">
-                                              {item.isDistinta ? (
-                                                  <span className="text-[9px] font-extrabold text-orange-800 bg-orange-100 px-1.5 py-0.5 rounded">MAGAZZINO</span>
-                                              ) : item.isPregresso ? (
-                                                  <span className="text-[9px] font-extrabold text-indigo-800 bg-indigo-100 px-1.5 py-0.5 rounded flex items-center gap-1"><Lock size={9}/> {item.oraInizio}-{item.oraFine}</span>
-                                              ) : giornoSceltoFiltro !== "sospesi" ? (
-                                                  <span className="text-[10px] font-mono font-extrabold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">{item.oraInizio}-{item.oraFine}</span>
-                                              ) : null}
-
-                                              {!item.isDistinta && (
-                                                  <span className="text-[9px] font-mono font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 shrink-0">BI:{item.numeroBi}</span>
-                                              )}
-                                              
-                                              <span className="text-xs font-extrabold text-slate-900 truncate">{item.nome}</span>
-                                              
-                                              {item.resoEstintori && <span className="bg-amber-100 text-amber-800 text-[9px] font-extrabold px-1.5 py-0.5 rounded shrink-0">SOS</span>}
-                                              {item.haInsoluto && <span className="bg-red-100 text-red-800 text-[9px] font-extrabold px-1.5 py-0.5 rounded shrink-0">INS</span>}
-                                          </div>
-                                          
-                                          <div className="flex items-center justify-between mt-1">
-                                              <span className="text-[10px] font-medium text-slate-500 truncate pr-2">
-                                                  <MapPin size={10} className="inline mr-1 text-slate-400"/>
-                                                  {item.indirizzo}{item.localita ? `, ${item.localita}` : ""}
-                                              </span>
-                                              {!item.isPregresso && !item.isDistinta && (
-                                                  <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded shrink-0">
-                                                      {item.minutiLavoro}m
-                                                  </span>
-                                              )}
-                                          </div>
-                                      </div>
-
-                                      {/* BOTTONI AZIONE SEMPRE VISIBILI E COMODI */}
-                                      <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                                          {!item.isPregresso && !item.isDistinta && (
-                                              <div className="relative">
-                                                  <button onClick={(e) => { e.stopPropagation(); setMenuAperto(menuAperto === item.codice ? null : item.codice); }} title="Sposta in un altro giorno" className="text-slate-600 hover:text-blue-600 p-1.5 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer bg-slate-50 border border-slate-200">
-                                                      <ArrowRightLeft size={13}/>
+                                  // CARD SPECIALIZZATA PER DISTINTA DI CARICO MAGAZZINO
+                                  if (item.isDistinta) {
+                                      return (
+                                          <div key={item.codice} className="p-3.5 rounded-xl border border-orange-200 bg-orange-50/70 shadow-xs">
+                                              <div className="flex items-center justify-between gap-2 mb-2">
+                                                  <div className="flex items-center gap-2">
+                                                      <span className="px-2 py-0.5 rounded bg-orange-200 text-orange-900 font-extrabold text-[10px]">07:00 - 08:00 • MAGAZZINO</span>
+                                                      <span className="font-extrabold text-xs text-slate-900">{item.nome}</span>
+                                                  </div>
+                                                  <button onClick={() => setClienteSelezionatoScheda(item)} className="text-orange-800 hover:bg-orange-100 px-2.5 py-1 rounded-lg text-[11px] font-bold border border-orange-200 bg-white cursor-pointer">
+                                                      Dettaglio & Link Maps
                                                   </button>
-                                                  {menuAperto === item.codice && (
-                                                      <div className="absolute top-full right-0 mt-1 bg-white border border-slate-200 shadow-2xl rounded-xl p-1.5 z-[99] w-36">
-                                                          <div className="text-[9px] font-extrabold text-slate-400 px-2 py-1 uppercase">Sposta a...</div>
-                                                          {giornateStats.map(gs => (
-                                                              <button key={gs.dataStr} onClick={(e) => { e.stopPropagation(); spostaCantiereRapido(item.codice, gs.dataStr); }} className="w-full text-left px-2 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-lg transition-colors cursor-pointer">
-                                                                  {gs.nomeGiorno} {formattaDataVisuale(gs.dataStr).slice(0,5)}
-                                                              </button>
-                                                          ))}
-                                                          {giornoSceltoFiltro !== "sospesi" && (
-                                                              <>
-                                                                  <div className="border-t border-slate-100 my-1"></div>
-                                                                  <button onClick={(e) => { e.stopPropagation(); spostaCantiereRapido(item.codice, null); }} className="w-full text-left px-2 py-1.5 text-[11px] font-bold text-amber-700 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer">
-                                                                      ⏸ Manda in Sospesi
-                                                                  </button>
-                                                              </>
+                                              </div>
+                                              <div className="text-[11px] font-mono text-slate-700 bg-white/90 p-2.5 rounded-lg border border-orange-200/80 whitespace-pre-wrap">
+                                                  {item.descrizioneDistinta}
+                                              </div>
+                                          </div>
+                                      );
+                                  }
+
+                                  // CARD COMPLETA PER CANTIERE O IMPEGNO PREGRESSO
+                                  return (
+                                      <div 
+                                          key={item.codice}
+                                          draggable={!(item.resoEstintori && item.giorniDallUltimoSos < 5) && !item.isPregresso}
+                                          onDragStart={(e) => handleDragStartKanban(e, item.codice)}
+                                          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverCard(item.codice); }}
+                                          onDragLeave={() => setDragOverCard(null)}
+                                          onDrop={(e) => handleDropToDay(e, giornoSceltoFiltro === "sospesi" ? null : giornoSceltoFiltro, item.codice)}
+                                          className={`group relative flex flex-col p-3.5 rounded-xl border transition-all
+                                              ${dragOverCard === item.codice ? 'border-t-4 border-t-blue-600 mt-1' : ''}
+                                              ${item.isPregresso ? 'bg-indigo-50/70 border-indigo-200' : 'bg-white border-slate-200 hover:border-blue-400 cursor-grab active:cursor-grabbing shadow-xs hover:shadow-md'}
+                                          `}
+                                      >
+                                          {/* RIGA 1: TESTATA ORARIO, VIAGGIO, BI, TAG E AZIONI */}
+                                          <div className="flex flex-wrap items-center justify-between gap-2 pb-2 mb-2 border-b border-slate-100">
+                                              <div className="flex flex-wrap items-center gap-1.5">
+                                                  {giornoSceltoFiltro !== "sospesi" && (
+                                                      <span className="w-6 h-6 rounded-full bg-slate-900 text-white flex items-center justify-center text-[11px] font-extrabold shrink-0">
+                                                          {numTappa}
+                                                      </span>
+                                                  )}
+
+                                                  {item.isPregresso ? (
+                                                      <span className="text-[11px] font-mono font-extrabold text-indigo-900 bg-indigo-100 px-2 py-0.5 rounded border border-indigo-200 flex items-center gap-1">
+                                                          <Lock size={10}/> TASSATIVO {item.oraInizio} - {item.oraFine}
+                                                      </span>
+                                                  ) : giornoSceltoFiltro !== "sospesi" ? (
+                                                      <span className="text-[11px] font-mono font-extrabold text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                                                          ⏰ {item.oraInizio} - {item.oraFine}
+                                                      </span>
+                                                  ) : null}
+
+                                                  {giornoSceltoFiltro !== "sospesi" && item.minutiDaPrecedente !== undefined && (
+                                                      <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1">
+                                                          <Car size={11}/> +{item.minutiDaPrecedente}m {item.isPartenzaDaSede ? "da Sede" : "viaggio"}
+                                                      </span>
+                                                  )}
+
+                                                  <span className="text-[10px] font-mono font-extrabold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                                                      BI: {item.numeroBi}
+                                                  </span>
+
+                                                  <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                                                      ⏱ {item.minutiLavoro} min
+                                                  </span>
+
+                                                  {!item.isPregresso && deveMostrareDC(item.nome) && (
+                                                      <span className="bg-slate-800 text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded">DC</span>
+                                                  )}
+                                                  {item.resoEstintori && (
+                                                      <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-extrabold px-2 py-0.5 rounded">SOS • RESO ESTINTORI</span>
+                                                  )}
+                                                  {item.haInsoluto && (
+                                                      <span className="bg-red-100 text-red-800 border border-red-300 text-[10px] font-extrabold px-2 py-0.5 rounded">INS • INSOLUTO</span>
+                                                  )}
+                                                  {item.syncedToGoogle && !item.isPregresso && (
+                                                      <span className="bg-emerald-100 text-emerald-800 text-[9px] font-extrabold px-1.5 py-0.5 rounded">✓ Sync</span>
+                                                  )}
+                                              </div>
+
+                                              {/* PULSANTI AZIONE */}
+                                              <div className="flex items-center gap-1.5">
+                                                  {giornoSceltoFiltro === "sospesi" && !(item.resoEstintori && item.giorniDallUltimoSos < 5) && (
+                                                      <button onClick={(e) => { e.stopPropagation(); apriModaleSospeso(item); }} className="bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded-lg text-[10px] font-extrabold cursor-pointer">
+                                                          📅 Pianifica
+                                                      </button>
+                                                  )}
+                                                  {!item.isPregresso && (
+                                                      <div className="relative">
+                                                          <button onClick={(e) => { e.stopPropagation(); setMenuAperto(menuAperto === item.codice ? null : item.codice); }} title="Sposta in un altro giorno" className="text-slate-700 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer bg-slate-50 border border-slate-200 flex items-center gap-1 text-[10px] font-bold">
+                                                              <ArrowRightLeft size={12}/> Sposta
+                                                          </button>
+                                                          {menuAperto === item.codice && (
+                                                              <div className="absolute top-full right-0 mt-1 bg-white border border-slate-200 shadow-2xl rounded-xl p-1.5 z-[99] w-40">
+                                                                  <div className="text-[9px] font-extrabold text-slate-400 px-2 py-1 uppercase">Assegna a...</div>
+                                                                  {giornateStats.map(gs => (
+                                                                      <button key={gs.dataStr} onClick={(e) => { e.stopPropagation(); spostaCantiereRapido(item.codice, gs.dataStr); }} className="w-full text-left px-2 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-lg transition-colors cursor-pointer">
+                                                                          {gs.nomeGiorno} {formattaDataVisuale(gs.dataStr).slice(0,5)}
+                                                                      </button>
+                                                                  ))}
+                                                                  {giornoSceltoFiltro !== "sospesi" && (
+                                                                      <>
+                                                                          <div className="border-t border-slate-100 my-1"></div>
+                                                                          <button onClick={(e) => { e.stopPropagation(); spostaCantiereRapido(item.codice, null); }} className="w-full text-left px-2 py-1.5 text-[11px] font-bold text-amber-700 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer">
+                                                                              ⏸ Manda in Sospesi
+                                                                          </button>
+                                                                      </>
+                                                                  )}
+                                                              </div>
                                                           )}
                                                       </div>
                                                   )}
+                                                  <button onClick={(e) => { e.stopPropagation(); setClienteSelezionatoScheda(item); }} title="Apri scheda dettagli" className="text-slate-600 hover:text-blue-600 p-1.5 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer bg-slate-50 border border-slate-200">
+                                                      <FileText size={13}/>
+                                                  </button>
+                                              </div>
+                                          </div>
+
+                                          {/* RIGA 2: NOME CLIENTE E INDIRIZZO COMPLETO */}
+                                          <div className="mb-2">
+                                              <div className="text-sm font-extrabold text-slate-900 leading-snug">
+                                                  {item.nome}
+                                              </div>
+                                              <div className="text-xs font-semibold text-slate-600 flex items-center gap-1 mt-0.5">
+                                                  <MapPin size={12} className="text-blue-600 shrink-0"/>
+                                                  <span>{item.indirizzo || "Indirizzo non specificato"}{item.cap ? ` - ${item.cap}` : ""}{item.localita ? ` ${item.localita}` : ""}</span>
+                                              </div>
+                                          </div>
+
+                                          {/* RIGA 3: REFERENTE, TELEFONO ED EMAIL (SEMPRE VISIBILI) */}
+                                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200/80 mb-2 text-[11px]">
+                                              <div className="flex items-center gap-1.5 truncate">
+                                                  <User size={12} className="text-slate-500 shrink-0"/>
+                                                  <span className="text-slate-500 font-semibold">Ref:</span>
+                                                  <span className="font-extrabold text-slate-800 truncate">{item.contatto || "Non indicato"}</span>
+                                              </div>
+                                              <div className="flex items-center gap-1.5 truncate">
+                                                  <Phone size={12} className="text-emerald-600 shrink-0"/>
+                                                  <span className="text-slate-500 font-semibold">Tel:</span>
+                                                  {item.telefono ? (
+                                                      <a href={`tel:${item.telefono}`} onClick={(e) => e.stopPropagation()} className="font-mono font-extrabold text-blue-700 hover:underline truncate">
+                                                          {item.telefono}
+                                                      </a>
+                                                  ) : (
+                                                      <span className="text-slate-400 italic">Nessun tel.</span>
+                                                  )}
+                                              </div>
+                                              <div className="flex items-center gap-1.5 truncate">
+                                                  <Mail size={12} className="text-slate-500 shrink-0"/>
+                                                  <span className="font-mono text-slate-700 truncate">{item.email || "-"}</span>
+                                              </div>
+                                          </div>
+
+                                          {/* RIGA 4: DATI DEL RAPPORTINO / ATTREZZATURE E MULETTI (SEMPRE VISIBILI) */}
+                                          {item.isPregresso ? (
+                                              <div className="bg-indigo-100/50 border border-indigo-200/80 rounded-lg px-3 py-2 text-[11px] text-indigo-950 whitespace-pre-wrap font-medium">
+                                                  {item.descrizionePregressa}
+                                              </div>
+                                          ) : (
+                                              <div className="bg-blue-50/50 border border-blue-200/70 rounded-lg px-3 py-2">
+                                                  <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                                                      <span className="text-[10px] font-extrabold uppercase text-blue-900 flex items-center gap-1">
+                                                          <Wrench size={11}/> Dati Rapportino & Attrezzature ({item.totaleArticoli || 0} pz totali)
+                                                      </span>
+                                                      {item.muletti_eorv > 0 && (
+                                                          <span className="text-[10px] font-extrabold bg-orange-100 text-orange-900 border border-orange-300 px-2 py-0.5 rounded">
+                                                              📦 Muletti EO_RV: {item.muletti_eorv} pz
+                                                          </span>
+                                                      )}
+                                                  </div>
+                                                  {item.dettaglioAttrezzature && item.dettaglioAttrezzature.length > 0 ? (
+                                                      <div className="flex flex-wrap gap-1.5 mt-1">
+                                                          {item.dettaglioAttrezzature.map((att: any, iAtt: number) => (
+                                                              <span key={iAtt} className="bg-white border border-blue-200 text-slate-800 px-2 py-0.5 rounded text-[11px] font-bold">
+                                                                  {att.descrizione}: <strong className="text-blue-700 font-mono">{att.quantita}</strong> <span className="text-[10px] text-slate-400">({att.minutiImpegno}m)</span>
+                                                              </span>
+                                                          ))}
+                                                      </div>
+                                                  ) : (
+                                                      <span className="text-[11px] text-slate-500 italic">Intervento standard (10 min base)</span>
+                                                  )}
                                               </div>
                                           )}
-                                          <button onClick={(e) => { e.stopPropagation(); setClienteSelezionatoScheda(item); }} title="Apri scheda dettagli" className="text-slate-600 hover:text-blue-600 p-1.5 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer bg-slate-50 border border-slate-200">
-                                              <FileText size={13}/>
-                                          </button>
+
+                                          {/* MOTIVO SOSPESO O RIENTRO IN SEDE */}
+                                          {giornoSceltoFiltro === "sospesi" && item.motivoSospeso && (
+                                              <div className="mt-2 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg">
+                                                  ⚠️ Stato: {item.motivoSospeso}
+                                              </div>
+                                          )}
+
+                                          {giornoSceltoFiltro !== "sospesi" && item.isRientroSede && item.minutiVersoProssimo !== undefined && (
+                                              <div className="mt-2 text-[10px] font-bold text-slate-700 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+                                                  <HomeIcon size={12} className="text-slate-600"/> Rientro in Sede stimato: +{item.minutiVersoProssimo} min di viaggio
+                                              </div>
+                                          )}
                                       </div>
-                                  </div>
-                              ))
+                                  );
+                              })
                           )}
                       </div>
                   </div>
@@ -1904,11 +2066,12 @@ Tecnico: ${tecnicoNome}`;
                           <MapContainer key={giornoSceltoFiltro} center={[SEDE_UFFICIO_LAT, SEDE_UFFICIO_LNG]} zoom={11} style={{ height: "100%", width: "100%" }}>
                               <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                               {listaAttiva.filter(i => i.lat && i.lng && !i.isDistinta).map((c, idx) => (
-                                  <Marker key={c.codice} position={[c.lat, c.lng]} icon={createNumberedIcon(idx + (listaAttiva[0]?.isDistinta ? 0 : 1))}>
+                                  <Marker key={c.codice} position={[c.lat, c.lng]} icon={createNumberedIcon(idx + 1)}>
                                       <Popup>
                                           <div className="p-1">
-                                              <p className="font-bold text-xs text-slate-900">{c.nome}</p>
+                                              <p className="font-bold text-xs text-slate-900">#{idx + 1} - {c.nome}</p>
                                               <p className="text-[10px] text-slate-600">{c.indirizzo}, {c.localita}</p>
+                                              {c.telefono && <p className="text-[10px] font-mono text-slate-700 mt-0.5">📞 {c.telefono}</p>}
                                               <p className="text-[10px] font-mono font-bold text-blue-600 mt-1">{c.oraInizio || "Sospeso"} ({c.minutiLavoro}m)</p>
                                           </div>
                                       </Popup>
@@ -1937,7 +2100,7 @@ Tecnico: ${tecnicoNome}`;
                               <div className="p-3 bg-amber-50 text-amber-600 rounded-xl inline-block mb-3"><FileUp size={24}/></div>
                               <span className="bg-amber-100 text-amber-800 font-extrabold text-[10px] px-2.5 py-1 rounded-md ml-2 uppercase">2. Caricamento Dati</span>
                               <h3 className="font-extrabold text-slate-900 text-base mb-1">Importa il File Cantieri</h3>
-                              <p className="text-xs text-slate-500 leading-relaxed">Clicca su <strong>Sfoglia Excel</strong>. Il sistema raggrupperà i cantieri per BI univoco senza perdere nessuna sede.</p>
+                              <p className="text-xs text-slate-500 leading-relaxed">Clicca su <strong>Sfoglia Excel</strong>. Il sistema estrarrà referenti, telefoni e attrezzature del rapportino per ogni BI.</p>
                           </div>
                           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs relative overflow-hidden">
                               <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl inline-block mb-3"><Sliders size={24}/></div>
@@ -2027,13 +2190,13 @@ Tecnico: ${tecnicoNome}`;
                    </div>
 
                    <div>
-                      <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 border-b border-slate-100 pb-1">Attrezzature ({clienteSelezionatoScheda.totaleArticoli || 0} pz)</h4>
+                      <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 border-b border-slate-100 pb-1">Attrezzature del Rapportino ({clienteSelezionatoScheda.totaleArticoli || 0} pz)</h4>
                       {clienteSelezionatoScheda.dettaglioAttrezzature && clienteSelezionatoScheda.dettaglioAttrezzature.length > 0 ? (
                          <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
                             {clienteSelezionatoScheda.dettaglioAttrezzature.map((att: any, idx: number) => (
                                <div key={idx} className="p-3 flex justify-between items-center bg-white text-xs">
                                   <span className="font-bold text-slate-800">{att.descrizione}</span>
-                                  <span className="font-mono bg-slate-50 border border-slate-200 px-2 py-0.5 rounded text-slate-700">Q.tà: {att.quantita}</span>
+                                  <span className="font-mono bg-slate-50 border border-slate-200 px-2 py-0.5 rounded text-slate-700">Q.tà: {att.quantita} ({att.minutiImpegno}m)</span>
                                </div>
                             ))}
                          </div>
@@ -2052,7 +2215,7 @@ Tecnico: ${tecnicoNome}`;
         </div>
       )}
 
-      {/* VISTA STAMPA FOGLIO DI VIAGGIO */}
+      {/* VISTA STAMPA FOGLIO DI VIAGGIO COMPLETA CON REFERENTI E TELEFONI */}
       <div className="hidden print:block w-full text-black bg-white font-sans text-sm p-6">
          {giorniVisibiliPerStampa.map((dataStr: any) => {
             const interventiGiorno = interventiGrezzi.filter(i => i.dataAssegnata === dataStr && (i.selezionatoPerGiro || i.isPregresso));
@@ -2088,9 +2251,9 @@ Tecnico: ${tecnicoNome}`;
                         <thead>
                            <tr className="bg-gray-100 border-b border-black">
                               <th className="p-2 border border-black w-24">Orario</th>
-                              <th className="p-2 border border-black w-48">Riferimento BI & Cliente</th>
-                              <th className="p-2 border border-black">Indirizzo & Località</th>
-                              <th className="p-2 border border-black">Attrezzature / Note</th>
+                              <th className="p-2 border border-black w-48">Cliente & BI</th>
+                              <th className="p-2 border border-black w-48">Indirizzo & Contatti</th>
+                              <th className="p-2 border border-black">Dati Rapportino / Attrezzature</th>
                            </tr>
                         </thead>
                         <tbody>
@@ -2101,11 +2264,19 @@ Tecnico: ${tecnicoNome}`;
                                     {lav.nome}
                                     <span className="block font-mono font-normal text-[10px] text-gray-600 mt-0.5">BI: {lav.numeroBi}</span>
                                  </td>
-                                 <td className="p-2 border border-black align-top">{lav.indirizzo} {lav.localita ? `- ${lav.localita}` : ""}</td>
+                                 <td className="p-2 border border-black align-top">
+                                    <div>{lav.indirizzo} {lav.localita ? `- ${lav.localita}` : ""}</div>
+                                    {(lav.contatto || lav.telefono) && (
+                                       <div className="font-mono text-[10px] mt-1">
+                                          {lav.contatto ? `Ref: ${lav.contatto} ` : ""}{lav.telefono ? `Tel: ${lav.telefono}` : ""}
+                                       </div>
+                                    )}
+                                 </td>
                                  <td className="p-2 border border-black align-top text-[11px]">
                                     {lav.dettaglioAttrezzature && lav.dettaglioAttrezzature.length > 0 
                                        ? lav.dettaglioAttrezzature.map((d: any) => `${d.descrizione}: ${d.quantita}`).join(", ") 
                                        : "Verifica standard"}
+                                    {lav.muletti_eorv > 0 ? ` (Muletti: ${lav.muletti_eorv})` : ""}
                                  </td>
                               </tr>
                            ))}
@@ -2128,7 +2299,7 @@ Tecnico: ${tecnicoNome}`;
       </button>
 
       <div 
-        className={`fixed bottom-24 right-6 z-[90] w-[350px] h-[500px] max-h-[70vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden transition-all duration-300 origin-bottom-right print:hidden ${
+        className={`fixed bottom-24 right-6 z-[90] w-[360px] h-[520px] max-h-[75vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden transition-all duration-300 origin-bottom-right print:hidden ${
           isChatOpen ? 'scale-100 opacity-100 translate-y-0' : 'scale-95 opacity-0 translate-y-8 pointer-events-none'
         }`}
       >
@@ -2167,7 +2338,7 @@ Tecnico: ${tecnicoNome}`;
             type="text"
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
-            placeholder="Es. Sposta Rossi a giovedì..."
+            placeholder="Es. Sposta Rossi a giovedì mattina..."
             className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-blue-500 transition-colors"
           />
           <button type="submit" disabled={chatLoading} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 shrink-0">
