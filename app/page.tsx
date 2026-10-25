@@ -7,11 +7,11 @@ import Papa from "papaparse";
 import dynamic from "next/dynamic";
 import {
   UploadCloud, AlertCircle, Package, MapPin, Loader2, FileSpreadsheet,
-  Zap, UserCheck, Printer, Calendar, Clock, CheckSquare, Mail, Timer,
-  FileText, X, Sliders, Check, PauseCircle, ExternalLink, AlertTriangle,
-  CheckCircle, PlayCircle, Lock, CalendarPlus, Phone, Book, User,
-  Banknote, Car, Home as HomeIcon, AlertOctagon, MessageSquare,
-  ArrowRightLeft, List, Map as MapIcon, FileUp
+  Zap, UserCheck, Printer, Calendar, CheckSquare, Mail,
+  FileText, X, Sliders, Check, PauseCircle, ExternalLink,
+  CheckCircle, Lock, CalendarPlus, Phone, Book, User,
+  Banknote, Home as HomeIcon, AlertOctagon, MessageSquare,
+  ArrowRightLeft, List, FileUp
 } from "lucide-react";
 
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
@@ -552,7 +552,7 @@ Tecnico: ${tecnicoNome}`;
 
   const ricalcolaDistinteEOrari = async (listaDaOrdinare: any[], statsLocali: any[] = giornateStats, usaOrdinamentoGeografico = true) => {
       const listaPulita = listaDaOrdinare.filter(i => !i.isDistinta && i.dataAssegnata && typeof i.dataAssegnata === 'string');
-      const mapGiorni = new Map();
+      const mapGiorni = new globalThis.Map();
       const vecchieDistinte = listaDaOrdinare.filter(i => i.isDistinta);
       const nuoveStats = statsLocali.map(g => ({ ...g }));
       
@@ -729,7 +729,7 @@ Tecnico: ${tecnicoNome}`;
     setProgressIA({ active: true, percent: 5, text: "Avvio elaborazione e lettura dati Excel..." });
 
     try {
-        const clientiMappa = new Map();
+        const clientiMappa = new globalThis.Map();
         
         setProgressIA({ active: true, percent: 15, text: "Sincronizzazione impegni Calendar in corso..." });
         const impegniEsistenti = await fetchEventiRealiCalendar(tecnicoSelezionato.email, googleToken);
@@ -1352,7 +1352,7 @@ Tecnico: ${tecnicoNome}`;
     if (!file) return;
 
     elaboraFileExcelGenerico(file, (righe) => {
-       const insolutiMappa = new Map();
+       const insolutiMappa = new globalThis.Map();
        
        righe.forEach(r => {
           const numeroBi = String(r.numdoc || r.nrob || r.id_bi || r.documento || r.codicebi || "").trim();
